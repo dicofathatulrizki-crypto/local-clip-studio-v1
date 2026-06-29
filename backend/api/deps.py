@@ -1,82 +1,104 @@
 """
-Dependency injection configuration for Local Clip Studio.
+Dependency injection providers for Local Clip Studio.
 
-Uses FastAPI's dependency injection system to provide request-scoped
-and application-scoped dependencies to route handlers and services.
+Provides FastAPI dependencies using the factory pattern:
+- Settings
+- Encryption service
+- Database sessions
+- File system service
+- Logging
 
-All dependencies are wired through this module to provide a single
-source of truth for DI configuration.
-
-Usage:
-    from fastapi import Depends
-    from backend.api.deps import get_settings, get_logger
-
-    @router.get("/")
-    async def handler(
-        settings=Depends(get_settings),
-    ):
-        ...
+Following Clean Architecture: dependencies are injected through
+constructor injection, never instantiated directly by services.
 """
-
 from __future__ import annotations
 
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request
+from fastapi import Request
 
-from backend.config.settings import Settings, get_settings
+from backend.config.encryption import get_encryption, APIKeyEncryption
+from backend.config.settings import Settings, get_settings, reload_settings
+from backend.infrastructure.logging.correlation import get_request_id, set_request_id
 from backend.infrastructure.logging.logger import get_logger
-from backend.infrastructure.logging.correlation import (
-    get_request_id,
-    set_correlation_id,
-    set_request_id,
-)
+
+logger = get_logger(__name__)
 
 
-def configure_di(app: FastAPI) -> None:
-    """
-    Configure dependency injection for the FastAPI application.
-
-    Registers startup hooks, middleware wrappers, and any
-    app-wide state needed for DI resolution.
-
-    Args:
-        app: The FastAPI application instance.
-    """
-    # Register exception handlers
-    from backend.api.middleware import (
-        app_error_handler,
-        catch_all_exceptions,
-        validation_exception_handler,
-    )
-    from fastapi.exceptions import RequestValidationError
-
-    app.add_exception_handler(AppError, app_error_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    app.add_exception_handler(Exception, catch_all_exceptions)
+# ─── Settings Dependencies ──────────────────────────────────────
 
 
-# ─── Dependency Providers ────────────────────────────────────────────────
-
-
-async def get_settings_dep() -> Settings:
-    """Provide the application settings singleton."""
+def get_settings_dep() -> Settings:
+    """Provide the application settings instance."""
     return get_settings()
 
 
-async def get_logger_dep(name: str = "api") -> AsyncGenerator:
-    """Provide a request-scoped logger."""
-    logger = get_logger(name)
-    yield logger
+def get_encryption_dep() -> APIKeyEncryption:
+    """Provide the API key encryption service."""
+    return get_encryption()
 
 
-async def request_context(request: Request) -> None:
-    """Initialize trace context for the current request."""
-    rid = request.headers.get("X-Request-ID")
-    if rid:
-        set_request_id(rid)
-    set_correlation_id()
+# ─── Request-Scoped Dependencies ────────────────────────────────
 
 
-# ─── Late imports to avoid circular dependencies ─────────────────────────
-from backend.infrastructure.errors.app_error import AppError  # noqa: E402
+def get_request_id_dep() -> str:
+    """Provide the current request ID from the request context."""
+    return get_request_id()
+
+
+# ─── Database Dependencies (placeholder) ────────────────────────
+
+
+async def get_db_session() -> AsyncGenerator[None, None]:
+    """Provide a database session for the request lifecycle.
+
+    Placeholder — will be implemented in Module A4.
+    """
+    try:
+        yield
+    finally:
+        pass
+
+
+# ─── Service Dependencies (placeholders for future modules) ─────
+
+
+def get_project_service() -> None:
+    """Placeholder — will be implemented in Module B5."""
+    raise NotImplementedError("ProjectService not yet implemented")
+
+
+def get_import_service() -> None:
+    """Placeholder — will be implemented in Module B6."""
+    raise NotImplementedError("ImportService not yet implemented")
+
+
+def get_pipeline_service() -> None:
+    """Placeholder — will be implemented in Module C4."""
+    raise NotImplementedError("PipelineService not yet implemented")
+
+
+def get_export_service() -> None:
+    """Placeholder — will be implemented in Module C8."""
+    raise NotImplementedError("ExportService not yet implemented")
+
+
+def get_settings_service() -> None:
+    """Placeholder — will be implemented in Module B7."""
+    raise NotImplementedError("SettingsService not yet implemented")
+
+
+def get_provider_service() -> None:
+    """Placeholder — will be implemented in Module B8."""
+    raise NotImplementedError("ProviderService not yet implemented")
+
+
+# ─── Router Registration Helper ─────────────────────────────────
+
+
+def register_routes(app: "FastAPI") -> None:
+    """Register all API route modules.
+
+    Placeholder — routes will be added as modules B10 and C10.
+    """
+    logger.info("API routes will be registered in Phase B (Core API)")

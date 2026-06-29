@@ -1,132 +1,135 @@
 """
 Tests for the error handling framework (backend/infrastructure/errors/).
-
-Covers:
-- AppError creation with all fields
-- Each error subclass
-- Error serialization to dict
-- HTTP status code mapping
 """
-
 from __future__ import annotations
 
 import pytest
 
 from backend.infrastructure.errors import (
     AppError,
-    ConflictError,
-    ExportError,
-    ImportError,
-    NotFoundError,
-    PipelineError,
-    PluginError,
-    SecurityError,
-    StorageError,
-    SystemError,
-    ValidationError,
+    ErrorSeverity,
+    error_catalog,
+    format_error_response,
+    get_error_info,
 )
 
 
+class TestErrorCatalog:
+    """Test the error catalog registry."""
+
+    def test_catalog_has_required_errors(self) -> None:
+        """The catalog should contain all required error codes."""
+        required_codes = [
+            "ERR-VALIDATION-001",
+            "ERR-IMP-001",
+            "ERR-IMP-002",
+            "ERR-IMP-003",
+            "ERR-PIPE-001",
+            "ERR-PIPE-003",
+            "ERR-EXP-001",
+            "ERR-SYS-001",
+            "ERR-SYS-004",
+            "ERR-NOTFOUND-001",
+            "ERR-CONFLICT-001",
+        ]
+        for code in required_codes:
+            assert code in error_catalog, f"Missing required error: {code}"
+
+    def test_catalog_entry_has_required_fields(self) -> None:
+        """Each catalog entry should have all required fields."""
+        for code, entry in error_catalog.items():
+            assert entry.code == code
+            assert entry.category, f"Error {code} missing category"
+            assert entry.severity, f"Error {code} missing severity"
+            assert entry.message, f"Error {code} missing message"
+            assert entry.recovery, f"Error {code} missing recovery"
+            assert isinstance(entry.http_status, int)
+            assert 100 <= entry.http_status <= 599
+
+    def test_catalog_http_status_codes(self) -> None:
+        """HTTP status codes should be semantically correct."""
+        # Validation errors → 422
+        for code, entry in error_catalog.items():
+            if "VALIDATION" in code:
+                assert entry.http_status == 422, f"{code} should be 422"
+            elif "NOTFOUND" in code:
+                assert entry.http_status == 404, f"{code} should be 404"
+            elif "CONFLICT" in code:
+                assert entry.http_status == 409, f"{code} should be 409"
+
+    def test_get_error_info(self) -> None:
+        """get_error_info() should return the full catalog as dict."""
+        info = get_error_info()
+        assert "ERR-IMP-001" in info
+        assert info["ERR-IMP-001"]["code"] == "ERR-IMP-001"
+        assert info["ERR-IMP-001"]["http_status"] == 415
+
+
 class TestAppError:
-    """Verify base AppError behavior."""
+    """Test the AppError exception class."""
 
-    def test_create_minimal(self):
-        error = AppError(code="ERR-TEST-001", message="Test error")
-        assert error.code == "ERR-TEST-001"
-        assert error.message == "Test error"
-        assert error.status_code == 500
-        assert error.details == {}
-        assert error.recovery is None
-        assert error.severity == "ERROR"
-
-    def test_create_full(self):
+    def test_app_error_with_catalog_code(self) -> None:
+        """Creating AppError with a valid catalog code should auto-populate fields."""
         error = AppError(
-            code="ERR-TEST-002",
-            message="Full error",
-            status_code=400,
-            details={"field": "name"},
-            recovery="Provide a valid name.",
-            severity="WARNING",
+            code="ERR-IMP-001",
+            details={"supported_formats": [".mp4"]},
         )
-        assert error.status_code == 400
-        assert error.details == {"field": "name"}
-        assert error.recovery == "Provide a valid name."
-
-    def test_to_dict(self):
-        error = AppError(code="ERR-TEST-003", message="Dict test", details={"key": "val"})
-        d = error.to_dict()
-        assert d["code"] == "ERR-TEST-003"
-        assert d["message"] == "Dict test"
-        assert d["details"] == {"key": "val"}
-
-    def test_to_log_dict(self):
-        error = AppError(code="ERR-TEST-004", message="Log test")
-        d = error.to_log_dict()
-        assert d["severity"] == "ERROR"
-        assert d["status_code"] == 500
-
-    def test_repr(self):
-        error = AppError(code="ERR-TEST-005", message="Repr test")
-        r = repr(error)
-        assert "AppError" in r
-        assert "ERR-TEST-005" in r
-
-
-class TestErrorSubclasses:
-    """Verify each error subclass has correct defaults."""
-
-    def test_validation_error(self):
-        error = ValidationError("Invalid input", details={"field": "name"})
-        assert error.status_code == 400
-        assert error.code == "ERR-VALIDATION-001"
-        assert "Invalid input" in str(error)
-
-    def test_not_found_error(self):
-        error = NotFoundError("Project", "uuid-123")
-        assert error.status_code == 404
-        assert error.code == "ERR-NOTFOUND-001"
-        assert "Project" in error.message
-        assert "uuid-123" in error.message
-
-    def test_conflict_error(self):
-        error = ConflictError("Already analyzing", recovery="Wait for completion")
-        assert error.status_code == 409
-        assert error.code == "ERR-CONFLICT-001"
-        assert error.recovery is not None
-
-    def test_import_error(self):
-        error = ImportError("001", "Unsupported format", details={"format": ".wmv"})
         assert error.code == "ERR-IMP-001"
-        assert error.status_code == 400
+        assert error.http_status == 415
+        assert "Unsupported file format" in error.message
+        assert error.catalog_entry is not None
 
-    def test_pipeline_error(self):
-        error = PipelineError("001", "STT failed", stage="transcribing", recovery="Restart pipeline")
-        assert error.code == "ERR-PIPE-001"
-        assert error.details.get("stage") == "transcribing"
-        assert error.recovery is not None
+    def test_app_error_with_custom_message(self) -> None:
+        """Custom message should override catalog message."""
+        error = AppError(
+            code="ERR-IMP-001",
+            message="Custom error message",
+        )
+        assert error.message == "Custom error message"
 
-    def test_export_error(self):
-        error = ExportError("001", "Encoding failed", details={"codec": "h265"})
-        assert error.code == "ERR-EXP-001"
-        assert error.status_code == 500
+    def test_app_error_without_catalog_code(self) -> None:
+        """Unknown error code should still create a valid error."""
+        error = AppError(
+            code="ERR-UNKNOWN-999",
+            message="Something went wrong",
+            http_status=500,
+        )
+        assert error.code == "ERR-UNKNOWN-999"
+        assert error.message == "Something went wrong"
+        assert error.http_status == 500
+        assert error.catalog_entry is None
 
-    def test_storage_error(self):
-        error = StorageError("Disk full", details={"required_gb": 10, "available_gb": 2})
-        assert error.code == "ERR-STORAGE-001"
-        assert error.status_code == 507
+    def test_app_error_with_details(self) -> None:
+        """Details dict should be preserved in the error."""
+        error = AppError(
+            code="ERR-IMP-002",
+            details={"limit_gb": 50, "size_gb": 100},
+        )
+        assert error.details["limit_gb"] == 50
+        assert error.details["size_gb"] == 100
 
-    def test_system_error(self):
-        error = SystemError("001", "FFmpeg not found", recovery="Install FFmpeg")
-        assert error.code == "ERR-SYS-001"
-        assert error.status_code == 503
-        assert error.severity == "CRITICAL"
+    def test_format_error_response(self) -> None:
+        """format_error_response should produce the standard API error format."""
+        error = AppError(
+            code="ERR-IMP-001",
+            details={"provided_format": ".wmv"},
+        )
+        response = format_error_response(error)
 
-    def test_security_error(self):
-        error = SecurityError("Path traversal detected", details={"path": "../etc"})
-        assert error.code == "ERR-SEC-001"
-        assert error.status_code == 403
+        assert "error" in response
+        assert response["error"]["code"] == "ERR-IMP-001"
+        assert response["error"]["details"]["provided_format"] == ".wmv"
+        assert "request_id" in response["error"]
+        assert "timestamp" in response["error"]
+        assert "recovery" in response["error"]
 
-    def test_plugin_error(self):
-        error = PluginError("001", "Plugin crashed", plugin_name="whisperx")
-        assert error.code == "ERR-PLUG-001"
-        assert error.details.get("plugin") == "whisperx"
+
+class TestAppErrorSeverity:
+    """Test severity levels."""
+
+    def test_error_severity_values(self) -> None:
+        """ErrorSeverity enum should have correct values."""
+        assert ErrorSeverity.INFO.value == "info"
+        assert ErrorSeverity.WARNING.value == "warning"
+        assert ErrorSeverity.ERROR.value == "error"
+        assert ErrorSeverity.CRITICAL.value == "critical"

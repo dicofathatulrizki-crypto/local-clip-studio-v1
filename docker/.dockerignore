@@ -1,48 +1,59 @@
-# Git
-.git
-.gitignore
-
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 *.egg-info/
 dist/
 build/
-venv/
+*.egg
 .venv/
-.env
-
-# Node / Frontend
-node_modules/
-frontend/
-dist/
-.vite/
+venv/
+env/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+*.key
+*.pem
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Local data
-.localclip/
+# Project
+~/.localclip/
+localclip_data/
+
+# Logs
+*.log
+/logs/
+
+# Database
 *.db
-*.db-journal
+*.sqlite
+/alembic/versions/*.pyc
 
-# Tests
-tests/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+# AI Models
+/models/**
+
+# Temp
+/temp/
+/tmp/
+
+# Test artifacts
+.htmlcov/
 .coverage
-htmlcov/
+coverage/
+coverage.xml
+.pytest_cache/
+test-results/
 
-# Documentation
-docs/
-
-# Scripts except those needed in runtime
-scripts/setup.sh
-scripts/download_models.sh
+# Node/Frontend
+node_modules/
+frontend/

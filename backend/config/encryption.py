@@ -1,189 +1,176 @@
 """
-Encryption utilities for Local Clip Studio.
+Secure storage of API keys using AES-256-GCM encryption.
 
-API keys and other sensitive data are encrypted at rest using
-Fernet symmetric encryption (AES-256-GCM). The encryption key is
-derived from a machine-specific identifier to bind encrypted data
-to the hardware it was created on.
+Encryption keys are derived from a machine-specific identifier,
+ensuring that encrypted API keys cannot be decrypted on a different machine.
 
-Never log or expose encryption keys.
+Uses the `cryptography` library for Fernet (AES-256-CBC with HMAC) encryption.
 """
-
 from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
+import platform
 from pathlib import Path
+from threading import Lock
 
-from cryptography.fernet import Fernet, InvalidToken
-
-from backend.config.defaults import DEFAULT_STORAGE_PATH
-
-# ─── Constants ────────────────────────────────────────────────────────────
-KEY_FILE_NAME = "key.der"
-KEY_ENV_VAR = "LOCALCLIP_ENCRYPTION_KEY"
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
-def _get_machine_id() -> str:
+# ─── Key Derivation ─────────────────────────────────────────────
+
+
+def _get_machine_secret() -> bytes:
+    """Derive a machine-specific secret for encryption key generation.
+
+    Combines multiple machine-identifying attributes to create a unique
+    but stable device identifier. This ensures encrypted keys are
+    bound to a specific machine.
     """
-    Derive a machine-specific identifier for key binding.
-
-    Uses /etc/machine-id on Linux, or falls back to a hash of
-    hostname + os-specific paths. This means the encryption key
-    is tied to the machine — copying the config to another machine
-    will not work without the encryption key.
-    """
-    # Try Linux machine-id
-    machine_id_paths = [
-        Path("/etc/machine-id"),
-        Path("/var/lib/dbus/machine-id"),
+    parts = [
+        platform.node(),           # Hostname
+        platform.machine(),        # Architecture (x86_64, arm64)
+        platform.processor(),      # Processor info
+        os.name,                   # OS name (posix, nt)
     ]
-
-    for path in machine_id_paths:
-        if path.exists():
-            try:
-                return path.read_text().strip()
-            except OSError:
-                continue
-
-    # Fallback: hash of hostname + home directory
-    import socket
-
-    hostname = socket.gethostname()
-    home = str(Path.home())
-    return hashlib.sha256(f"{hostname}:{home}".encode()).hexdigest()[:32]
-
-
-def _derive_key(machine_id: str | None = None) -> bytes:
-    """
-    Derive a 32-byte Fernet key from machine identity.
-
-    The key is deterministic for a given machine but different
-    across machines. If LOCALCLIP_ENCRYPTION_KEY env var is set,
-    it takes precedence over machine-derived key.
-    """
-    env_key = os.environ.get(KEY_ENV_VAR)
-    if env_key:
-        # User-provided key (must be 44-character base64-encoded 32 bytes)
+    if os.path.exists("/etc/machine-id"):
         try:
-            return base64.urlsafe_b64decode(env_key.encode())
-        except (ValueError, base64.binascii.Error):
-            raise ValueError(
-                f"Environment variable {KEY_ENV_VAR} must be a valid "
-                f"44-character base64-encoded Fernet key"
-            )
+            with open("/etc/machine-id") as f:
+                parts.append(f.read().strip())
+        except IOError:
+            pass
 
-    if machine_id is None:
-        machine_id = _get_machine_id()
-
-    # Hash machine ID to 32 bytes
-    key_bytes = hashlib.sha256(machine_id.encode()).digest()
-    return key_bytes
+    return "|".join(parts).encode("utf-8")
 
 
-def _get_fernet(key_path: Path | None = None) -> Fernet:
+def _derive_fernet_key(salt: bytes | None = None) -> tuple[bytes, bytes]:
+    """Derive a Fernet-compatible 32-byte key from machine-specific data.
+
+    Returns (key, salt) tuple. Salt can be persisted to allow key
+    regeneration across application restarts.
     """
-    Get or create a Fernet instance.
+    if salt is None:
+        salt = os.urandom(16)
 
-    The encryption key is stored in the config directory on first use
-    and reused thereafter. If the key file doesn't exist, it's created
-    from the machine-derived key.
+    secret = _get_machine_secret()
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=600_000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(secret))
+    return key, salt
+
+
+# ─── Encryption Service ─────────────────────────────────────────
+
+
+class APIKeyEncryption:
+    """Encrypts and decrypts API keys using a machine-specific key.
+
+    The encryption key is derived on first use and cached in-memory.
+    The salt is persisted to ~/.localclip/config/key.salt so that
+    the same key can be regenerated across application restarts.
     """
-    if key_path is None:
-        config_dir = DEFAULT_STORAGE_PATH / "config"
-        key_path = config_dir / KEY_FILE_NAME
 
-    if key_path.exists():
-        key_data = key_path.read_bytes()
-    else:
-        # Create deterministic key from machine identity
-        key_data = _derive_key()
-        key_path.parent.mkdir(parents=True, exist_ok=True)
-        key_path.write_bytes(key_data)
-        # Restrict permissions
-        key_path.chmod(0o600)
+    def __init__(self, config_dir: str | Path | None = None) -> None:
+        if config_dir is None:
+            config_dir = Path.home() / ".localclip" / "config"
+        self._config_dir = Path(config_dir)
+        self._config_dir.mkdir(parents=True, exist_ok=True)
 
-    # Fernet expects a 32-byte url-safe base64-encoded key
-    encoded_key = base64.urlsafe_b64encode(key_data)
-    return Fernet(encoded_key)
+        self._fernet: Fernet | None = None
+        self._lock = Lock()
+
+    @property
+    def key_path(self) -> Path:
+        return self._config_dir / "key.salt"
+
+    def _get_or_create_key(self) -> Fernet:
+        """Get the cached Fernet instance or create one from persisted salt."""
+        if self._fernet is not None:
+            return self._fernet
+
+        with self._lock:
+            if self._fernet is not None:
+                return self._fernet
+
+            # Load existing salt or create new one
+            if self.key_path.exists():
+                salt = self.key_path.read_bytes()
+            else:
+                salt = os.urandom(16)
+                self.key_path.write_bytes(salt)
+
+            key, _ = _derive_fernet_key(salt)
+            self._fernet = Fernet(key)
+            return self._fernet
+
+    def encrypt(self, plaintext: str) -> str:
+        """Encrypt a string (e.g., API key) and return base64-encoded ciphertext."""
+        if not plaintext:
+            return ""
+        fernet = self._get_or_create_key()
+        token = fernet.encrypt(plaintext.encode("utf-8"))
+        return token.decode("utf-8")
+
+    def decrypt(self, ciphertext: str) -> str:
+        """Decrypt a base64-encoded ciphertext back to the original string."""
+        if not ciphertext:
+            return ""
+        fernet = self._get_or_create_key()
+        token = fernet.decrypt(ciphertext.encode("utf-8"))
+        return token.decode("utf-8")
+
+    def encrypt_dict(self, data: dict) -> dict:
+        """Encrypt all string values in a dictionary (for API keys in provider config)."""
+        result = {}
+        for key, value in data.items():
+            if isinstance(value, str) and value and not value.startswith("gAAAAA"):
+                result[key] = self.encrypt(value)
+            else:
+                result[key] = value
+        return result
+
+    def decrypt_dict(self, data: dict) -> dict:
+        """Decrypt all string values in a dictionary."""
+        result = {}
+        for key, value in data.items():
+            if isinstance(value, str) and value.startswith("gAAAAA"):  # Fernet prefix
+                result[key] = self.decrypt(value)
+            else:
+                result[key] = value
+        return result
 
 
-def encrypt_value(plaintext: str, key_path: Path | None = None) -> str:
-    """
-    Encrypt a string value (e.g., API key) for storage.
+# ─── Global Instance ────────────────────────────────────────────
 
-    Args:
-        plaintext: The value to encrypt.
-        key_path: Optional custom path to the encryption key file.
-
-    Returns:
-        Encrypted token as a base64-encoded string prefixed with 'enc:'.
-    """
-    if not plaintext:
-        return ""
-
-    fernet = _get_fernet(key_path)
-    encrypted = fernet.encrypt(plaintext.encode("utf-8"))
-    return "enc:" + encrypted.decode("utf-8")
+_encryption_instance: APIKeyEncryption | None = None
+_encryption_lock = Lock()
 
 
-def decrypt_value(encrypted_token: str, key_path: Path | None = None) -> str:
-    """
-    Decrypt a previously encrypted value.
+def get_encryption() -> APIKeyEncryption:
+    """Get the global APIKeyEncryption instance (thread-safe)."""
+    global _encryption_instance
+    if _encryption_instance is not None:
+        return _encryption_instance
 
-    Args:
-        encrypted_token: The encrypted token (must start with 'enc:').
-        key_path: Optional custom path to the encryption key file.
-
-    Returns:
-        Decrypted plaintext string.
-
-    Raises:
-        ValueError: If the token cannot be decrypted (wrong machine or
-                    corrupted data).
-    """
-    if not encrypted_token:
-        return ""
-
-    if not encrypted_token.startswith("enc:"):
-        return encrypted_token  # Not encrypted, return as-is
-
-    try:
-        fernet = _get_fernet(key_path)
-        token = encrypted_token[4:]  # Strip 'enc:' prefix
-        decrypted = fernet.decrypt(token.encode("utf-8"))
-        return decrypted.decode("utf-8")
-    except (InvalidToken, ValueError, IndexError) as exc:
-        raise ValueError(
-            "Failed to decrypt API key. The key may have been "
-            "encrypted on a different machine, or the key file "
-            "has been corrupted."
-        ) from exc
+    with _encryption_lock:
+        if _encryption_instance is None:
+            _encryption_instance = APIKeyEncryption()
+    return _encryption_instance
 
 
-def rotate_key(old_key_path: Path, new_key_path: Path, encrypted_values: list[str]) -> list[str]:
-    """
-    Re-encrypt values with a new key (key rotation).
+def encrypt_api_key(plaintext: str) -> str:
+    """Convenience function: encrypt an API key."""
+    return get_encryption().encrypt(plaintext)
 
-    Args:
-        old_key_path: Path to the current encryption key.
-        new_key_path: Path where the new key will be stored.
-        encrypted_values: List of encrypted tokens to re-encrypt.
 
-    Returns:
-        List of re-encrypted tokens using the new key.
-    """
-    # Decrypt all values with old key
-    decrypted = [decrypt_value(val, old_key_path) for val in encrypted_values]
-
-    # Generate new key
-    new_config_dir = new_key_path.parent
-    new_config_dir.mkdir(parents=True, exist_ok=True)
-    new_key_data = _derive_key(os.urandom(32).hex())  # Use random seed for new key
-    new_key_path.write_bytes(new_key_data)
-    new_key_path.chmod(0o600)
-
-    # Re-encrypt with new key
-    re_encrypted = [encrypt_value(val, new_key_path) for val in decrypted]
-    return re_encrypted
+def decrypt_api_key(ciphertext: str) -> str:
+    """Convenience function: decrypt an API key."""
+    return get_encryption().decrypt(ciphertext)

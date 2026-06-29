@@ -68,11 +68,14 @@ ai = [
     "opencv-python>=4.8.0",
     "numpy>=1.24.0",
 ]
+# GPU extras: Install PyTorch with the appropriate CUDA/ROCm index URL:
+# CUDA: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# ROCm: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm5.6
 gpu-cuda = [
-    "torch>=2.1.0 --index-url https://download.pytorch.org/whl/cu121",
+    "torch>=2.1.0",
 ]
 gpu-rocm = [
-    "torch>=2.1.0 --index-url https://download.pytorch.org/whl/rocm5.6",
+    "torch>=2.1.0",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,35 +1,43 @@
-# Local Clip Studio — Backend Docker Image
-#
-# Build:   docker build -f docker/Dockerfile -t localclip-backend .
-# Run:     docker run -p 8765:8765 -v ~/.localclip:/home/user/.localclip localclip-backend
+FROM python:3.11-slim AS base
 
-FROM python:3.11-slim-bookworm AS base
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ─── System Dependencies ──────────────────────────────────────────────────
+WORKDIR /app
+
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1-mesa-glx \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# ─── Application ─────────────────────────────────────────────────────────
-WORKDIR /app
+# Install Python dependencies
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e ".[dev]"
 
-COPY pyproject.toml ./
+# Copy application code
 COPY backend/ backend/
+COPY scripts/ scripts/
 
-RUN pip install --no-cache-dir -e .
+# Create application directories
+RUN mkdir -p /home/user/.localclip/{config,projects,models,cache,logs,temp,plugins,exports}
 
-# ─── Runtime ─────────────────────────────────────────────────────────────
 EXPOSE 8765
 
-ENV LOCALCLIP_STORAGE_PATH=/home/user/.localclip
-ENV LOCALCLIP_HOST=0.0.0.0  # Docker requires bind to all interfaces
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8765"]
 
-# GPU passthrough (NVidia)
-# Run with: --gpus all
 
-VOLUME ["/home/user/.localclip"]
+# ─── GPU-enabled image ──────────────────────────────────────────
 
-ENTRYPOINT ["python", "-m", "backend.main"]
-CMD ["--host", "0.0.0.0", "--port", "8765"]
+FROM base AS gpu
+
+# Install CUDA support
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Install AI dependencies
+RUN pip install --no-cache-dir -e ".[ai]"
+
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8765"]

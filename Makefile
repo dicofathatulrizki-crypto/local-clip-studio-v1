@@ -1,73 +1,111 @@
-# Local Clip Studio — Makefile
-# Development automation for backend and frontend.
+.PHONY: dev dev-backend dev-frontend install install-dev install-ai test lint typecheck clean setup docker-build docker-up help
 
-.PHONY: help setup dev backend frontend test lint typecheck clean docker-build docker-up
+# ─── Development ───────────────────────────────────────────────
 
-help: ## Show this help message
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+dev: dev-backend  ## Start backend development server
 
-setup: ## Run the one-click setup script
-	bash scripts/setup.sh
+dev-backend:  ## Start FastAPI with hot reload
+	@echo "Starting backend server on http://localhost:8765"
+	@cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8765
 
-dev: ## Start both backend and frontend dev servers
-	bash scripts/dev.sh
+dev-backend-no-reload:  ## Start FastAPI without hot reload
+	@echo "Starting backend server on http://localhost:8765"
+	@cd backend && uvicorn main:app --host 0.0.0.0 --port 8765
 
-backend: ## Start only the backend server
-	@echo "Starting backend on http://127.0.0.1:8765"
-	python -m backend.main --reload
+# ─── Installation ──────────────────────────────────────────────
 
-frontend: ## Start only the frontend dev server
-	@echo "Starting frontend on http://localhost:5173"
-	bun run dev
+install:  ## Install base dependencies
+	pip install -e "."
 
-test: ## Run all tests
-	python -m pytest tests/ -v --tb=short
+install-dev: install  ## Install dev dependencies
+	pip install -e ".[dev]"
 
-test-cov: ## Run tests with coverage report
-	python -m pytest tests/ -v --tb=short --cov=backend --cov-report=term-missing
+install-ai: install  ## Install AI dependencies
+	pip install -e ".[ai]"
 
-test-unit: ## Run unit tests only
-	python -m pytest tests/unit/ -v --tb=short
+install-all: install-dev install-ai  ## Install all dependencies
 
-test-integration: ## Run integration tests only
-	python -m pytest tests/integration/ -v --tb=short
+setup:  ## Full project setup
+	@echo "Setting up Local Clip Studio..."
+	@pip install -e ".[dev]"
+	@scripts/setup.sh
+	@echo "Setup complete. Run 'make dev' to start."
 
-lint: ## Run the linter
-	python -m ruff check backend/ tests/
-	python -m ruff format --check backend/ tests/
+# ─── Testing ───────────────────────────────────────────────────
 
-format: ## Format code with ruff
-	python -m ruff format backend/ tests/
-	python -m ruff check --fix backend/ tests/
+test:  ## Run all tests
+	pytest -x -v
 
-typecheck: ## Run type checking with mypy
-	python -m mypy backend/ --ignore-missing-imports
+test-unit:  ## Run unit tests only
+	pytest -x -v tests/unit/ -m "not slow and not gpu"
 
-clean: ## Clean build artifacts and caches
-	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	rm -rf .coverage htmlcov/
-	@echo "Cleaned build artifacts"
+test-integration:  ## Run integration tests only
+	pytest -x -v tests/integration/ -m "not slow and not gpu"
 
-docker-build: ## Build Docker image
+test-slow:  ## Run all tests including slow tests
+	pytest -v
+
+test-cov:  ## Run tests with coverage report
+	pytest --cov=backend --cov-report=term --cov-report=html
+
+test-benchmarks:  ## Run performance benchmarks
+	pytest tests/performance/ --benchmark-only
+
+# ─── Linting & Type Checking ───────────────────────────────────
+
+lint:  ## Run ruff linter
+	ruff check backend/ tests/
+
+format:  ## Format code with ruff
+	ruff format backend/ tests/
+
+typecheck:  ## Run mypy type checking
+	mypy backend/
+
+check: lint typecheck test-unit  ## Run all checks (lint + types + tests)
+
+# ─── Database ──────────────────────────────────────────────────
+
+db-init:  ## Initialize database (create tables)
+	python -c "from backend.infrastructure.database.engine import init_db; init_db()"
+
+db-migrate:  ## Auto-generate new migration
+	alembic -c backend/infrastructure/database/migrations/alembic.ini revision --autogenerate -m "$(message)"
+
+db-upgrade:  ## Apply pending migrations
+	alembic -c backend/infrastructure/database/migrations/alembic.ini upgrade head
+
+db-downgrade:  ## Rollback last migration
+	alembic -c backend/infrastructure/database/migrations/alembic.ini downgrade -1
+
+# ─── Docker ────────────────────────────────────────────────────
+
+docker-build:  ## Build Docker images
 	docker compose -f docker/docker-compose.yml build
 
-docker-up: ## Start with Docker Compose
+docker-up:  ## Start services with Docker
 	docker compose -f docker/docker-compose.yml up -d
 
-docker-down: ## Stop Docker Compose
+docker-down:  ## Stop Docker services
 	docker compose -f docker/docker-compose.yml down
 
-download-models: ## Download default AI models
-	bash scripts/download_models.sh
+docker-logs:  ## View Docker logs
+	docker compose -f docker/docker-compose.yml logs -f
 
-db-migrate: ## Run database migrations
-	cd backend && alembic upgrade head
+# ─── Maintenance ───────────────────────────────────────────────
 
-db-rollback: ## Rollback last migration
-	cd backend && alembic downgrade -1
+clean:  ## Clean build artifacts
+	@rm -rf build/ dist/ *.egg-info .pytest_cache .coverage htmlcov/
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type f -name "*.pyc" -delete
+	@echo "Cleaned build artifacts"
 
-db-revision: ## Create a new migration revision
-	cd backend && alembic revision --autogenerate -m "$(name)"
+clean-all: clean  ## Deep clean including venv
+	@rm -rf venv/ .venv/
+	@echo "Deep clean complete"
+
+# ─── Help ──────────────────────────────────────────────────────
+
+help:  ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'

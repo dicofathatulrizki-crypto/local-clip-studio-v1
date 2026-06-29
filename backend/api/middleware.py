@@ -1,126 +1,106 @@
 """
-Middleware and exception handlers for the FastAPI application.
+API middleware for Local Clip Studio.
 
 Provides:
-- Request ID injection and propagation
-- Structured error responses for all error types
-- CORS configuration (already in main.py)
+- CORS configuration
+- Request ID injection
+- Error handling interceptor
+- Request timing
 """
-
 from __future__ import annotations
 
+import time
 import uuid
-from typing import Any
+from typing import Any, Awaitable, Callable
 
-from fastapi import Request
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.responses import Response
+from starlette.middleware.base import BaseHTTPMiddleware
 
-from backend.infrastructure.errors.app_error import AppError
-from backend.infrastructure.logging.correlation import get_trace_context, set_request_id
+from backend.config.settings import get_settings
+from backend.infrastructure.errors import AppError, format_error_response
+from backend.infrastructure.logging.correlation import get_request_id, set_request_id
 from backend.infrastructure.logging.logger import get_logger
 
+logger = get_logger(__name__)
 
-class RequestIDMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware that ensures every request has a unique request ID.
 
-    If the client provides an X-Request-ID header, it is used.
-    Otherwise, a new UUID is generated. The ID is set in the
-    trace context and echoed back in the response header.
-    """
+# ─── Request Timing Middleware ──────────────────────────────────
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-        set_request_id(rid)
 
+class RequestTimingMiddleware(BaseHTTPMiddleware):
+    """Log request duration for performance monitoring."""
+
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Any]]
+    ) -> Any:
+        start_time = time.monotonic()
         response = await call_next(request)
-        response.headers["X-Request-ID"] = rid
+        duration_ms = (time.monotonic() - start_time) * 1000
+
+        # Log slow requests (> 1 second)
+        if duration_ms > 1000:
+            logger.warning(
+                "Slow request",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "duration_ms": round(duration_ms, 2),
+                    "status_code": response.status_code,
+                    "request_id": get_request_id(),
+                },
+            )
+
+        response.headers["X-Response-Time-Ms"] = str(round(duration_ms, 2))
         return response
 
 
-async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-    """
-    Handle known application errors with structured responses.
+# ─── Request ID Middleware ──────────────────────────────────────
 
-    Returns:
-        JSON response with error code, message, details, and trace context.
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Ensure every request has a correlation ID."""
+
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Any]]
+    ) -> Any:
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        set_request_id(request_id)
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
+# ─── Middleware Registration ────────────────────────────────────
+
+
+def register_middleware(app: FastAPI) -> None:
+    """Register all middleware on the FastAPI application.
+
+    Order matters — middleware runs in reverse order of registration.
     """
-    logger = get_logger("api.error")
-    log_method = getattr(logger, exc.severity.lower(), logger.error)
-    log_method(
-        exc.message,
-        error_code=exc.code,
-        status_code=exc.status_code,
-        details=exc.details,
-        path=str(request.url.path),
+    settings = get_settings()
+
+    # 1. CORS (outermost)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.api.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": exc.to_dict(),
-            "request_id": get_trace_context().get("request_id", ""),
-        },
-    )
+    # 2. Request ID
+    app.add_middleware(RequestIDMiddleware)
 
+    # 3. Request timing (innermost — captures most accurate timing)
+    app.add_middleware(RequestTimingMiddleware)
 
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """
-    Handle Pydantic/FastAPI validation errors.
-
-    Returns:
-        JSON response with field-level validation error details.
-    """
-    logger = get_logger("api.validation")
-    errors = exc.errors()
-
-    logger.warning(
-        "Request validation failed",
-        path=str(request.url.path),
-        error_count=len(errors),
-    )
-
-    return JSONResponse(
-        status_code=422,
-        content={
-            "error": {
-                "code": "ERR-VALIDATION-001",
-                "message": "Request validation failed",
-                "details": {"errors": errors},
-                **get_trace_context(),
-            },
-            "request_id": get_trace_context().get("request_id", ""),
-        },
-    )
-
-
-async def catch_all_exceptions(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Catch-all exception handler for unexpected errors.
-
-    Returns:
-        Generic 500 error response. The real error details are
-        logged and not exposed to the user for security reasons.
-    """
-    logger = get_logger("api.error")
-    logger.critical(
-        "Unhandled exception",
-        exc_info=exc,
-        path=str(request.url.path),
-    )
-
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": {
-                "code": "ERR-SYS-000",
-                "message": "An unexpected error occurred. Check the logs for details.",
-                "recovery": "Restart the application and try again. If the error persists, check the logs.",
-                **get_trace_context(),
-            },
-            "request_id": get_trace_context().get("request_id", ""),
+    logger.info(
+        "Middleware registered",
+        extra={
+            "cors_origins": settings.api.cors_origins,
+            "middleware_count": 3,
         },
     )

@@ -5,28 +5,9 @@ __pycache__/
 dist/
 build/
 *.egg
-.eggs/
-*.whl
-*.so
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
-# Virtual environment
-venv/
 .venv/
+venv/
 env/
-.env/
-
-# Local Clip Studio runtime data
-.localclip/
-localclip-data/
 
 # IDE
 .vscode/
@@ -34,22 +15,53 @@ localclip-data/
 *.swp
 *.swo
 *~
-.DS_Store
 
-# Node / Frontend
-node_modules/
-dist/
-.vite/
-*.tsbuildinfo
+# Environment
+.env
+.env.local
+*.key
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+~/.localclip/
+localclip_data/
+
+# Logs
+*.log
+/logs/
+
+# Database
+*.db
+*.sqlite
+/alembic/versions/*.pyc
+
+# AI Models (too large, download on demand)
+/models/whisper/
+/models/yolo/
+/models/sam/
+/models/llm/
+/models/embeddings/
+
+# Temp
+/temp/
+/tmp/
+
+# Test artifacts
+.htmlcov/
+.coverage
+coverage/
+coverage.xml
+.pytest_cache/
+test-results/
 
 # Docker
 .docker/
 
-# OS
-Thumbs.db
-.DS_Store
-
-# Environment files
-.env
-.env.local
-*.key
+# Node/Frontend (if frontend is in same repo)
+node_modules/
+frontend/dist/
+frontend/.vite/

@@ -1,94 +1,117 @@
 """
-Tests for the encryption module (backend/config/encryption.py).
-
-Covers:
-- Encrypting and decrypting values
-- Encryption is bound to machine ID
-- Error handling for invalid tokens
-- Key rotation
+Tests for the encryption system (backend/config/encryption.py).
 """
-
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
-from backend.config.encryption import decrypt_value, encrypt_value, rotate_key
+from backend.config.encryption import (
+    APIKeyEncryption,
+    decrypt_api_key,
+    encrypt_api_key,
+    get_encryption,
+)
 
 
-class TestEncryption:
-    """Verify encryption and decryption round-trips."""
+class TestAPIKeyEncryption:
+    """Test API key encryption and decryption."""
 
-    def test_encrypt_decrypt_roundtrip(self, tmp_path: Path):
-        """Encrypting then decrypting returns the original value."""
-        key_path = tmp_path / "key.der"
+    def test_encrypt_decrypt_roundtrip(self, temp_dir: Path) -> None:
+        """Encrypting then decrypting should return the original value."""
+        encryption = APIKeyEncryption(config_dir=temp_dir)
         original = "sk-test-api-key-12345"
-        encrypted = encrypt_value(original, key_path)
-        assert encrypted.startswith("enc:")
+        encrypted = encryption.encrypt(original)
         assert encrypted != original
+        assert encrypted.startswith("gAAAAA")  # Fernet prefix
 
-        decrypted = decrypt_value(encrypted, key_path)
+        decrypted = encryption.decrypt(encrypted)
         assert decrypted == original
 
-    def test_encrypt_empty_string(self, tmp_path: Path):
-        """Encrypting empty string returns empty string."""
-        key_path = tmp_path / "key.der"
-        assert encrypt_value("", key_path) == ""
-        assert decrypt_value("", key_path) == ""
+    def test_empty_string(self, temp_dir: Path) -> None:
+        """Empty string should return empty string (no-op)."""
+        encryption = APIKeyEncryption(config_dir=temp_dir)
+        assert encryption.encrypt("") == ""
+        assert encryption.decrypt("") == ""
 
-    def test_decrypt_unencrypted_value(self, tmp_path: Path):
-        """Decrypting a non-encrypted value returns it as-is."""
-        key_path = tmp_path / "key.der"
-        assert decrypt_value("not-encrypted", key_path) == "not-encrypted"
+    def test_key_persistence(self, temp_dir: Path) -> None:
+        """The salt file should be created and reused."""
+        encryption1 = APIKeyEncryption(config_dir=temp_dir)
+        original = "sk-test-key-abc"
+        encrypted = encryption1.encrypt(original)
 
-    def test_decrypt_corrupted_token(self, tmp_path: Path):
-        """Decrypting a corrupted token raises ValueError."""
-        key_path = tmp_path / "key.der"
-        with pytest.raises(ValueError, match="Failed to decrypt"):
-            decrypt_value("enc:invalid-token", key_path)
+        # Create new instance pointing to same directory
+        encryption2 = APIKeyEncryption(config_dir=temp_dir)
+        decrypted = encryption2.decrypt(encrypted)
+        assert decrypted == original
 
-    def test_different_keys_produce_different_ciphertexts(self, tmp_path: Path):
-        """Same value encrypted twice produces different outputs."""
-        key_path = tmp_path / "key.der"
-        original = "same-value"
-        e1 = encrypt_value(original, key_path)
-        e2 = encrypt_value(original, key_path)
-        assert e1 != e2  # Fernet includes a unique IV each time
+    def test_salt_file_created(self, temp_dir: Path) -> None:
+        """Salt file should be created in the config directory."""
+        encryption = APIKeyEncryption(config_dir=temp_dir)
+        encryption.encrypt("test-key")
+        assert (temp_dir / "key.salt").exists()
 
-    def test_key_created_automatically(self, tmp_path: Path):
-        """Encrypting creates the key file automatically."""
-        key_path = tmp_path / "subdir" / "key.der"
-        assert not key_path.exists()
-        encrypt_value("test", key_path)
-        assert key_path.exists()
+    def test_different_instances_same_key(self, temp_dir: Path) -> None:
+        """Multiple instances with same config dir should be interchangeable."""
+        enc1 = APIKeyEncryption(config_dir=temp_dir)
+        enc2 = APIKeyEncryption(config_dir=temp_dir)
+
+        encrypted = enc1.encrypt("cross-instance-test")
+        decrypted = enc2.decrypt(encrypted)
+        assert decrypted == "cross-instance-test"
+
+    def test_encrypt_dict(self, temp_dir: Path) -> None:
+        """encrypt_dict should encrypt string values only."""
+        encryption = APIKeyEncryption(config_dir=temp_dir)
+        data = {
+            "api_key": "sk-secret-123",
+            "model": "gpt-4",
+            "temperature": 0.7,
+            "enabled": True,
+        }
+        result = encryption.encrypt_dict(data)
+        assert result["api_key"].startswith("gAAAAA")
+        assert result["model"] == "gpt-4"
+        assert result["temperature"] == 0.7
+        assert result["enabled"] is True
+
+    def test_decrypt_dict(self, temp_dir: Path) -> None:
+        """decrypt_dict should decrypt Fernet-encrypted values."""
+        encryption = APIKeyEncryption(config_dir=temp_dir)
+        encrypted_key = encryption.encrypt("my-secret-key")
+        data = {
+            "api_key": encrypted_key,
+            "model": "gpt-4",
+        }
+        result = encryption.decrypt_dict(data)
+        assert result["api_key"] == "my-secret-key"
+        assert result["model"] == "gpt-4"
+
+    def test_encrypt_idempotent_different_ciphertext(self, temp_dir: Path) -> None:
+        """Same plaintext should produce different ciphertext each time (random IV)."""
+        encryption = APIKeyEncryption(config_dir=temp_dir)
+        plaintext = "same-value"
+        e1 = encryption.encrypt(plaintext)
+        e2 = encryption.encrypt(plaintext)
+        assert e1 != e2  # Different due to random IV
+        assert encryption.decrypt(e1) == encryption.decrypt(e2)
 
 
-class TestKeyRotation:
-    """Verify key rotation works correctly."""
+class TestGlobalEncryption:
+    """Test the global encryption instance functions."""
 
-    def test_key_rotation(self, tmp_path: Path):
-        old_key = tmp_path / "old_key.der"
-        new_key = tmp_path / "new_key.der"
+    def test_global_encrypt_decrypt(self) -> None:
+        """Global encrypt_api_key and decrypt_api_key should work."""
+        original = "sk-global-test-key"
+        encrypted = encrypt_api_key(original)
+        assert encrypted != original
 
-        values = ["key1", "key2", "key3"]
-        encrypted = [encrypt_value(v, old_key) for v in values]
+        decrypted = decrypt_api_key(encrypted)
+        assert decrypted == original
 
-        # Rotate keys
-        re_encrypted = rotate_key(old_key, new_key, encrypted)
-
-        # Verify new key was created
-        assert new_key.exists()
-
-        # Verify old key still exists (not deleted)
-        assert old_key.exists()
-
-        # Verify values can be decrypted with the new key
-        for original, encrypted_token in zip(values, re_encrypted):
-            assert decrypt_value(encrypted_token, new_key) == original
-
-        # Verify old key can no longer decrypt the new versions
-        # (Old key was used to create new key's values, but the new_key
-        # uses a random seed, so old key won't work)
-        # Actually, this test verifies the new key works, which is the main goal.
+    def test_get_encryption_singleton(self) -> None:
+        """get_encryption() should return the same instance."""
+        e1 = get_encryption()
+        e2 = get_encryption()
+        assert e1 is e2

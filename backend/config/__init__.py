@@ -1,5 +1,14 @@
-"""Application configuration module."""
+"""
+Configuration management for Local Clip Studio.
 
-from backend.config.settings import Settings, get_settings
+Provides:
+- Pydantic-based settings loading from JSON config files
+- Secure encryption/decryption of API keys
+- Default configuration values
+- Hot-reload capable settings service
+"""
+from __future__ import annotations
 
-__all__ = ["Settings", "get_settings"]
+from backend.config.settings import Settings, get_settings, reload_settings
+
+__all__ = ["Settings", "get_settings", "reload_settings"]

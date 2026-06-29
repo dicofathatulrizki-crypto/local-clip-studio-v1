@@ -1,97 +1,56 @@
 """
 Correlation ID propagation for request tracing.
 
-Each incoming request gets a unique correlation ID that is propagated
-through all service calls, Celery tasks, and subprocess invocations.
-This enables end-to-end tracing of operations.
-
-Usage:
-    from backend.infrastructure.logging.correlation import (
-        get_correlation_id,
-        set_correlation_id,
-    )
-
-    # In middleware:
-    set_correlation_id(request.headers.get("X-Request-ID"))
-
-    # In services:
-    cid = get_correlation_id()
-    logger.info("Processing video", correlation_id=cid)
+Uses Python's contextvars to carry a correlation/request ID
+through async operations without explicit parameter passing.
 """
-
 from __future__ import annotations
 
 import uuid
 from contextvars import ContextVar
-from typing import Any
 
-# Context variable for async-safe correlation ID propagation
-_correlation_id: ContextVar[str] = ContextVar("correlation_id", default="")
+# Context variable for the current request ID
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
-
-
-def generate_id() -> str:
-    """Generate a new UUID4-based correlation ID."""
-    return str(uuid.uuid4())
-
-
-def get_correlation_id() -> str:
-    """Get the current correlation ID, or empty string if not set."""
-    return _correlation_id.get()
-
-
-def set_correlation_id(cid: str | None = None) -> str:
-    """
-    Set the correlation ID for the current context.
-
-    Args:
-        cid: Correlation ID to set. If None, generates a new one.
-
-    Returns:
-        The correlation ID that was set.
-    """
-    if not cid:
-        cid = generate_id()
-    _correlation_id.set(cid)
-    return cid
+_correlation_id: ContextVar[str] = ContextVar("correlation_id", default="")
 
 
 def get_request_id() -> str:
-    """Get the current request ID, or empty string if not set."""
+    """Get the current request ID from async context."""
     return _request_id.get()
 
 
-def set_request_id(rid: str | None = None) -> str:
-    """
-    Set the request ID for the current context.
+def set_request_id(request_id: str | None = None) -> str:
+    """Set the request ID for the current async context.
 
     Args:
-        rid: Request ID to set. If None, generates a new one.
+        request_id: Explicit request ID, or None to generate one.
 
     Returns:
-        The request ID that was set.
+        The request ID string.
     """
-    if not rid:
-        rid = generate_id()
-    _request_id.set(rid)
-    return rid
+    if request_id is None:
+        request_id = str(uuid.uuid4())
+    _request_id.set(request_id)
+    return request_id
 
 
-def get_trace_context() -> dict[str, str]:
-    """Get all trace context values as a dictionary."""
-    ctx: dict[str, str] = {}
-    corr_id = get_correlation_id()
-    req_id = get_request_id()
-    if corr_id:
-        ctx["correlation_id"] = corr_id
-    if req_id:
-        ctx["request_id"] = req_id
-    return ctx
+def get_correlation_id() -> str:
+    """Get the current correlation ID from async context."""
+    return _correlation_id.get()
 
 
-def with_trace_context(extra: dict[str, Any] | None = None) -> dict[str, str]:
-    """Get trace context merged with optional extra fields."""
-    ctx = get_trace_context()
-    if extra:
-        ctx.update(extra)
-    return ctx
+def set_correlation_id(correlation_id: str | None = None) -> str:
+    """Set the correlation ID for the current async context.
+
+    Args:
+        correlation_id: Explicit correlation ID, or None to generate one.
+
+    Returns:
+        The correlation ID string.
+    """
+    if correlation_id is None:
+        correlation_id = str(uuid.uuid4())
+    _correlation_id.set(correlation_id)
+    return correlation_id
+
+

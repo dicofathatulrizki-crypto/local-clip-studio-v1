@@ -1,97 +1,113 @@
 #!/usr/bin/env bash
-#
-# Local Clip Studio — AI Model Downloader
-#
-# Downloads the default AI models to ~/.localclip/models/.
-# Individual models can be selected with command-line arguments.
-#
-# Usage: bash scripts/download_models.sh [model_name...]
-#
-# Examples:
-#   bash scripts/download_models.sh              # Download all default models
-#   bash scripts/download_models.sh whisper      # Only whisper
-#   bash scripts/download_models.sh yolo whisper  # Specific models
-#
-
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_DIR"
+# AI Model download script for Local Clip Studio
+# Usage: ./download_models.sh [model_category]
+#   Categories: whisper, yolo, llm, all
+#   Default: all
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+MODELS_DIR="${HOME}/.localclip/models"
 
-info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*"; }
+# Model definitions
+declare -A MODELS
+MODELS["whisper-large-v3"]="whisper|large-v3|https://huggingface.co/guillaumeklf/faster-whisper-large-v3|3100"
+MODELS["whisper-medium"]="whisper|medium|https://huggingface.co/guillaumeklf/faster-whisper-medium|1500"
+MODELS["yolov8n-face"]="yolo|yolov8n-face|https://github.com/akanametov/yolov8-face/releases/download/v0.0.0/yolov8n-face.pt|6"
+MODELS["all-MiniLM-L6-v2"]="embeddings|all-MiniLM-L6-v2|https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2|80"
 
-# Default models to download if no arguments provided
-ALL_MODELS=("whisper" "yolo" "embeddings")
-
-download_whisper() {
-    local model="${1:-large-v3}"
-    info "Downloading Whisper model '${model}'..."
+download_hf_model() {
+    local model_id="$1"
+    local target_dir="$2"
+    echo "Downloading ${model_id}..."
     python3 -c "
-from faster_whisper import download_model
-download_model('${model}', cache_dir='$HOME/.localclip/models/whisper')
-print('Whisper model downloaded successfully')
+import os, sys
+try:
+    from huggingface_hub import snapshot_download
+    snapshot_download(repo_id='${model_id}', local_dir='${target_dir}', local_dir_use_symlinks=False)
+    print('Download complete.')
+except ImportError:
+    print('huggingface_hub not installed. Install with: pip install huggingface_hub')
+    sys.exit(1)
 "
-    ok "Whisper model '${model}' ready"
 }
 
-download_yolo() {
-    local model="${1:-yolov8n-face}"
-    info "Downloading YOLO model '${model}'..."
-    python3 -c "
-from ultralytics import YOLO
-model = YOLO('${model}.pt')
-model.export(format='onnx')
-print('YOLO model downloaded successfully')
-"
-    ok "YOLO model '${model}' ready"
+download_direct() {
+    local url="$1"
+    local target="$2"
+    echo "Downloading ${target}..."
+    mkdir -p "$(dirname "$target")"
+    if command -v wget &> /dev/null; then
+        wget -O "$target" "$url"
+    elif command -v curl &> /dev/null; then
+        curl -L -o "$target" "$url"
+    else
+        echo "Neither wget nor curl found. Install one of them."
+        exit 1
+    fi
 }
 
-download_embeddings() {
-    local model="${1:-all-MiniLM-L6-v2}"
-    info "Downloading embeddings model '${model}'..."
-    python3 -c "
-from sentence_transformers import SentenceTransformer
-model = SentenceTransformer('${model}', cache_folder='$HOME/.localclip/models/embeddings')
-print('Embeddings model downloaded successfully')
-"
-    ok "Embeddings model '${model}' ready"
-}
+download_model() {
+    local name="$1"
+    local entry="${MODELS[$name]:-}"
+    if [ -z "$entry" ]; then
+        echo "Unknown model: $name"
+        echo "Available: ${!MODELS[*]}"
+        return 1
+    fi
 
-# Main
-if [ $# -eq 0 ]; then
-    SELECTED=("${ALL_MODELS[@]}")
-else
-    SELECTED=("$@")
-fi
+    IFS='|' read -r category model_id url size_mb <<< "$entry"
+    local target_dir="${MODELS_DIR}/${category}"
 
-for model in "${SELECTED[@]}"; do
-    case "$model" in
-        whisper|whisperx|stt)
-            download_whisper
+    if [ -f "${target_dir}/${model_id}/.downloaded" ]; then
+        echo "  [SKIP] ${name} already downloaded."
+        return 0
+    fi
+
+    echo ""
+    echo "Downloading ${name} (~${size_mb} MB)..."
+    mkdir -p "$target_dir"
+
+    case "$category" in
+        whisper|embeddings)
+            download_hf_model "$url" "${target_dir}/${model_id}"
             ;;
-        yolo|yolov8|vision)
-            download_yolo
-            ;;
-        embeddings|embedding)
-            download_embeddings
-            ;;
-        *)
-            warn "Unknown model: $model. Skipping."
+        yolo)
+            download_direct "$url" "${target_dir}/${model_id}.pt"
             ;;
     esac
-done
 
-ok "All requested models downloaded."
-echo ""
-echo "Models stored in: $HOME/.localclip/models/"
-ls -lh "$HOME/.localclip/models/" 2>/dev/null || true
+    touch "${target_dir}/${model_id}/.downloaded" 2>/dev/null || true
+    echo "  [DONE] ${name}"
+}
+
+main() {
+    mkdir -p "$MODELS_DIR"
+    local category="${1:-all}"
+
+    case "$category" in
+        all)
+            for model in "${!MODELS[@]}"; do
+                download_model "$model"
+            done
+            ;;
+        whisper)
+            download_model "whisper-large-v3"
+            download_model "whisper-medium"
+            ;;
+        yolo)
+            download_model "yolov8n-face"
+            ;;
+        llm)
+            echo "LLM models require manual download. See documentation."
+            ;;
+        *)
+            download_model "$category"
+            ;;
+    esac
+
+    echo ""
+    echo "Download complete. Models stored in: ${MODELS_DIR}"
+    du -sh "$MODELS_DIR" 2>/dev/null || true
+}
+
+main "$@"

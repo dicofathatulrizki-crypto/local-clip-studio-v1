@@ -1,39 +1,32 @@
 """
-Structured JSON logging for Local Clip Studio.
+Structured JSON logger for Local Clip Studio.
 
-Provides a `get_logger()` function that returns a structured logger
-configured with:
-- JSON output format (for log aggregation)
-- ISO 8601 timestamps
-- Correlation ID injection
-- Sensitive data filtering (API keys, tokens)
-- Configurable log levels per module
-
-Usage:
-    from backend.infrastructure.logging import get_logger
-
-    logger = get_logger(__name__)
-    logger.info("Video import started", video_id="abc-123", file_size_mb=500)
-    logger.error("FFmpeg failed", exc_info=True, stderr="...")
+Provides:
+- JSON-formatted log output
+- Automatic correlation/request ID injection
+- Sensitive data filtering (API keys masked)
+- Log level configuration per module
+- Log rotation support
 """
-
 from __future__ import annotations
 
+import json
 import logging
+import os
 import sys
+from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
-import structlog
-from structlog.typing import EventDict
+from backend.infrastructure.logging.correlation import get_correlation_id, get_request_id
 
-from backend.config.settings import get_settings
-from backend.infrastructure.logging.correlation import get_trace_context
 
-# ─── Constants ────────────────────────────────────────────────────────────
+# ─── Sensitive Data Filter ──────────────────────────────────────
 
-_SENSITIVE_KEYS: frozenset[str] = frozenset({
+SENSITIVE_FIELDS = frozenset({
     "api_key",
-    "api_key",
+    "api_key_plaintext",
     "password",
     "secret",
     "token",
@@ -41,152 +34,144 @@ _SENSITIVE_KEYS: frozenset[str] = frozenset({
     "access_token",
     "refresh_token",
     "private_key",
-    "encryption_key",
 })
 
-# ─── Processors ───────────────────────────────────────────────────────────
 
+def _filter_sensitive_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Recursively mask sensitive fields in a dictionary.
 
-def _add_timestamp(_: logging.Logger, __: str, event_dict: EventDict) -> EventDict:
-    """Add ISO 8601 timestamp to every log entry."""
-    from datetime import datetime, timezone
-
-    event_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-    return event_dict
-
-
-def _add_trace_context(_: logging.Logger, __: str, event_dict: EventDict) -> EventDict:
-    """Inject correlation ID and request ID from context."""
-    trace = get_trace_context()
-    event_dict.update(trace)
-    return event_dict
-
-
-def _filter_sensitive_fields(_: logging.Logger, __: str, event_dict: EventDict) -> EventDict:
-    """Mask sensitive fields like API keys and tokens."""
-    for key in list(event_dict.keys()):
-        if key.lower() in _SENSITIVE_KEYS:
-            event_dict[key] = "***"
-    return event_dict
-
-
-def _format_exc_info(_: logging.Logger, __: str, event_dict: EventDict) -> EventDict:
-    """Format exception info as a string for JSON serialization."""
-    exc_info = event_dict.pop("exc_info", None)
-    if exc_info and not isinstance(exc_info, bool):
-        event_dict["exception"] = _serialize_exception(exc_info)
-    elif exc_info and isinstance(exc_info, bool):
-        # structlog will handle this via the format_exc_info processor
-        pass
-    return event_dict
-
-
-def _serialize_exception(exc_info: tuple[type, BaseException, object]) -> dict | None:
-    """Serialize exception info to a dict for structured logging."""
-    exc_type, exc_value, _traceback = exc_info
-    return {
-        "type": exc_type.__name__,
-        "message": str(exc_value),
-        "module": exc_type.__module__,
-    }
-
-
-# ─── Logger Configuration ────────────────────────────────────────────────
-
-
-def _configure_structlog(log_level: str) -> None:
+    Replaces values of known sensitive fields with '***MASKED***'.
     """
-    Configure structlog with JSON output and our custom processors.
+    result = {}
+    for key, value in data.items():
+        if key in SENSITIVE_FIELDS:
+            result[key] = "***MASKED***"
+        elif isinstance(value, dict):
+            result[key] = _filter_sensitive_data(value)
+        elif isinstance(value, list):
+            result[key] = [
+                _filter_sensitive_data(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+
+# ─── JSON Formatter ─────────────────────────────────────────────
+
+
+class JSONFormatter(logging.Formatter):
+    """Custom formatter that outputs JSON log records."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "request_id": get_request_id() or "",
+            "correlation_id": get_correlation_id() or "",
+        }
+
+        # Add exception info if present
+        if record.exc_info and record.exc_info[0] is not None:
+            log_entry["exception"] = {
+                "type": record.exc_info[0].__name__,
+                "message": str(record.exc_info[1]),
+            }
+
+        # Add extra fields from record
+        extra = getattr(record, "extra", None) or {}
+        if hasattr(record, "task_name"):
+            extra["task_name"] = record.task_name
+        if hasattr(record, "task_id"):
+            extra["task_id"] = record.task_id
+
+        if extra:
+            # Filter sensitive data before logging
+            filtered = _filter_sensitive_data(extra)
+            log_entry["details"] = filtered
+
+            # Extract duration if present
+            if "duration_ms" in extra:
+                log_entry["duration_ms"] = extra["duration_ms"]
+
+        # Duration from record (for time-based logging)
+        if hasattr(record, "relativeCreated"):
+            log_entry["relative_ms"] = round(record.relativeCreated, 2)
+
+        return json.dumps(log_entry, default=str)
+
+
+class TextFormatter(logging.Formatter):
+    """Human-readable text formatter for console output."""
+
+    FORMAT = "%(asctime)s [%(levelname)-7s] %(name)s: %(message)s"
+
+    def __init__(self) -> None:
+        super().__init__(self.FORMAT, datefmt="%Y-%m-%d %H:%M:%S")
+
+
+# ─── Logger Initialization ──────────────────────────────────────
+
+
+def configure_logging(
+    level: str = "INFO",
+    log_format: str = "json",
+    log_file: str | Path | None = None,
+    max_bytes: int = 500 * 1024 * 1024,  # 500 MB
+    backup_count: int = 30,
+) -> None:
+    """Configure the root logger with structured output.
 
     Args:
-        log_level: One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
+        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        log_format: 'json' for structured JSON, 'text' for human-readable.
+        log_file: Path to log file. If None, logs to stderr only.
+        max_bytes: Maximum size per log file before rotation.
+        backup_count: Number of rotated log files to retain.
     """
-    structlog.configure(
-        processors=[
-            _add_timestamp,
-            _add_trace_context,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
-            _filter_sensitive_fields,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.StackInfoRenderer(),
-            _format_exc_info,
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            structlog.dev.ConsoleRenderer() if log_level == "DEBUG" else structlog.processors.JSONRenderer(),
-        ],
-        wrapper_class=structlog.stdlib.BoundLogger,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-
-def _configure_stdlib_logging(log_level: str) -> None:
-    """Configure Python's standard logging to work with structlog."""
-    level = getattr(logging, log_level.upper(), logging.INFO)
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(level)
-
     root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
+    root_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
-    # Disable noisy third-party loggers
+    # Remove existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Console handler (stderr)
+    console_handler = logging.StreamHandler(sys.stderr)
+    if log_format == "json":
+        console_handler.setFormatter(JSONFormatter())
+    else:
+        console_handler.setFormatter(TextFormatter())
+    root_logger.addHandler(console_handler)
+
+    # File handler (if log_file specified)
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            str(log_path),
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+        )
+        file_handler.setFormatter(JSONFormatter())
+        root_logger.addHandler(file_handler)
+
+    # Suppress noisy third-party loggers
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 
-# ─── Public API ───────────────────────────────────────────────────────────
-
-
-_initialized: bool = False
-
-
-def ensure_configured() -> None:
-    """Ensure logging is configured. Safe to call multiple times."""
-    global _initialized
-    if _initialized:
-        return
-
-    settings = get_settings()
-    log_level = settings.log_level
-    _configure_structlog(log_level)
-    _configure_stdlib_logging(log_level)
-    _initialized = True
-
-
-def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
-    """
-    Get a structured logger for the given module name.
+def get_logger(name: str) -> logging.Logger:
+    """Get a logger instance with the given module name.
 
     Args:
-        name: Typically ``__name__`` from the calling module.
-              Falls back to 'root' if not provided.
+        name: Usually __name__ from the calling module.
 
     Returns:
-        A structured logger with bound context methods.
+        Configured Logger instance.
     """
-    ensure_configured()
-    return structlog.get_logger(name or "root")
-
-
-def get_log_level() -> str:
-    """Get the currently configured log level."""
-    return get_settings().log_level
-
-
-def set_log_level(level: str) -> None:
-    """Dynamically change the log level at runtime."""
-    level = level.upper()
-    if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
-        raise ValueError(f"Invalid log level: {level}")
-
-    logging.getLogger().setLevel(getattr(logging, level))
-    # Force re-configuration on next get_logger call
-    global _initialized
-    _initialized = False
-    ensure_configured()
+    return logging.getLogger(name)

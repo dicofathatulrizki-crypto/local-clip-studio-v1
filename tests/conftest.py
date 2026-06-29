@@ -7,7 +7,6 @@ Provides fixtures for:
 - Logging setup
 - File system paths
 """
-
 from __future__ import annotations
 
 import os
@@ -23,8 +22,7 @@ from backend.config.settings import Settings, get_settings, reload_settings
 
 @pytest.fixture(scope="session", autouse=True)
 def _configure_test_environment() -> Generator[None, None, None]:
-    """
-    Configure the test environment before any tests run.
+    """Configure the test environment before any tests run.
 
     Sets up:
     - A temporary storage location
@@ -72,5 +70,5 @@ def test_data_dir() -> Path:
 
 @pytest_asyncio.fixture
 async def async_settings() -> AsyncGenerator[Settings, None]:
-    """Provide settings in an async context."""
+    """Provide settings for async tests."""
     yield reload_settings()
