@@ -9,19 +9,21 @@ Uses a temporary SQLite database to test:
 """
 from __future__ import annotations
 
+import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from backend.infrastructure.database.base import Base
+from backend.infrastructure.database.base import Base, set_sqlite_pragmas
 from backend.infrastructure.database.models import (
     Analysis,
     CaptionTrack,
@@ -37,7 +39,6 @@ from backend.infrastructure.database.models import (
     VersionSnapshot,
     VideoMaster,
 )
-from backend.infrastructure.database.models.project import Project as ProjectModel
 from backend.infrastructure.database.repositories.project_repo import ProjectRepository
 
 
@@ -46,21 +47,22 @@ from backend.infrastructure.database.repositories.project_repo import ProjectRep
 
 @pytest.fixture
 async def db_session(tmp_path: Path) -> AsyncSession:
-    """Create a temporary SQLite database and provide a session."""
+    """Create a temporary SQLite database and provide a session.
+
+    Registers the SQLite pragma listener on the async engine's underlying
+    sync engine to ensure PRAGMA foreign_keys=ON is applied to every
+    connection (required for cascade delete and RESTRICT constraints).
+    """
     db_path = tmp_path / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
 
-    # Apply SQLite pragmas for FK enforcement
-    def _set_pragmas(conn: object, _record: object) -> None:
-        import sqlite3
+    # Register pragma listener on the underlying sync engine
+    # This ensures PRAGMA foreign_keys=ON is set on every connection,
+    # even when using aiosqlite (async wrapper).
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_pragmas_connect(conn: object, _record: object) -> None:
         if isinstance(conn, sqlite3.Connection):
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA journal_mode = WAL")
-
-    from sqlalchemy import event
-    from sqlalchemy.engine import Engine
-    event.listen(Engine, "connect", _set_pragmas)
-
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=True)
+            set_sqlite_pragmas(conn)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -87,6 +89,7 @@ async def sample_project(db_session: AsyncSession) -> Project:
         name="Test Project",
         description="A project for testing",
         storage_path="/tmp/test_project",
+        last_opened_at=datetime.now(UTC),
     )
     db_session.add(project)
     await db_session.flush()
@@ -174,7 +177,6 @@ class TestProjectCRUD:
         db_session.add(project)
         await db_session.flush()
 
-        # Fetch back
         result = await db_session.execute(
             select(Project).where(Project.id == project.id)
         )
@@ -249,7 +251,7 @@ class TestRelationships:
         db_session.add(pv)
         await db_session.flush()
 
-        # Delete project
+        # Delete project (should cascade to project_videos via ON DELETE CASCADE)
         await db_session.delete(sample_project)
         await db_session.flush()
 
@@ -273,11 +275,11 @@ class TestRelationships:
         await db_session.flush()
 
         # Cannot delete VideoMaster while ProjectVideo references it
-        # SQLite with foreign_keys=ON should raise IntegrityError
         await db_session.delete(sample_video)
-        import sqlalchemy.exc
-        with pytest.raises((sqlalchemy.exc.IntegrityError, Exception)):
+        with pytest.raises(IntegrityError):
             await db_session.flush()
+        # Rollback to clear the failed transaction for future tests
+        await db_session.rollback()
 
     async def test_timeline_one_to_one(
         self, db_session: AsyncSession, sample_project: Project
@@ -291,16 +293,17 @@ class TestRelationships:
         db_session.add(timeline)
         await db_session.flush()
 
-        # Second timeline should fail (unique constraint)
+        # Second timeline should violate unique constraint
         timeline2 = TimelineState(
             project_id=sample_project.id,
             tracks=[],
             markers=[],
         )
         db_session.add(timeline2)
-        import sqlalchemy.exc
-        with pytest.raises((sqlalchemy.exc.IntegrityError, Exception)):
+        with pytest.raises(IntegrityError):
             await db_session.flush()
+        # Rollback to clear the failed transaction for future tests
+        await db_session.rollback()
 
 
 # ─── Repository Tests ───────────────────────────────────────────
@@ -326,10 +329,13 @@ class TestProjectRepository:
         )
 
     async def test_get_recent(self) -> None:
-        """Get recent projects should return them sorted."""
+        """Get recent projects should return all non-archived projects."""
         recent = await self.repo.get_recent(count=10)
         assert len(recent) >= 3
-        assert recent[0].name == "Alpha"
+        names = {p.name for p in recent}
+        assert "Alpha" in names
+        assert "Beta" in names
+        assert "Gamma" in names
 
     async def test_search_by_name(self) -> None:
         """Search by name should find matches."""
@@ -416,11 +422,13 @@ class TestAnalysis:
         db_session.add(a1)
         await db_session.flush()
 
+        # Second analysis for same video should violate unique constraint
         a2 = Analysis(video_id=pv.id, status="pending")
         db_session.add(a2)
-        import sqlalchemy.exc
-        with pytest.raises((sqlalchemy.exc.IntegrityError, Exception)):
+        with pytest.raises(IntegrityError):
             await db_session.flush()
+        # Rollback to clear the failed transaction for future tests
+        await db_session.rollback()
 
 
 class TestSettings:

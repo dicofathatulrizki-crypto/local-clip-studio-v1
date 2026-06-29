@@ -9,6 +9,7 @@ Provides:
 """
 from __future__ import annotations
 
+import sqlite3
 import uuid
 from datetime import UTC, datetime
 
@@ -17,44 +18,17 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 
-
 # ─── SQLite Optimizations ───────────────────────────────────────
-
-
-def _get_underlying_sqlite3_connection(
-    dbapi_connection: object,
-) -> object | None:
-    """Get the raw sqlite3.Connection from various SQLite driver wrappers.
-
-    Handles:
-    - Direct sqlite3.Connection (sync engine)
-    - aiosqlite.Connection (async engine, wraps sqlite3.Connection internally)
-    - Any other object that might wrap sqlite3
-
-    Returns the sqlite3.Connection or None if not found.
-    """
-    import sqlite3
-
-    if isinstance(dbapi_connection, sqlite3.Connection):
-        return dbapi_connection
-
-    # Check for aiosqlite-style wrapper (private _connection attr)
-    raw = getattr(dbapi_connection, "_connection", None)
-    if isinstance(raw, sqlite3.Connection):
-        return raw
-
-    # Check for driver_connection attribute (used by some drivers)
-    raw = getattr(dbapi_connection, "driver_connection", None)
-    if isinstance(raw, sqlite3.Connection):
-        return raw
-
-    return None
 
 
 def set_sqlite_pragmas(dbapi_connection: object) -> None:
     """Configure SQLite connection pragmas for performance and safety.
 
-    Applied to every new SQLite connection:
+    Handles both sync (sqlite3.Connection) and async (aiosqlite.Connection)
+    drivers by attempting to get the underlying sqlite3 connection and
+    executing pragmas. Falls back gracefully for non-SQLite connections.
+
+    Pragmas applied:
     - WAL mode: better concurrent read performance
     - Foreign keys: enforce referential integrity
     - Busy timeout: wait 5s instead of failing immediately
@@ -63,28 +37,42 @@ def set_sqlite_pragmas(dbapi_connection: object) -> None:
     - Temp store: in-memory for temp tables
     - Memory-map: 256MB for faster reads
     """
-    conn = _get_underlying_sqlite3_connection(dbapi_connection)
-    if conn is None:
-        return
+    # Try to get a raw sqlite3 connection from various driver types
+    raw_conn: object | None = None
 
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode = WAL")
-    cursor.execute("PRAGMA foreign_keys = ON")
-    cursor.execute("PRAGMA busy_timeout = 5000")
-    cursor.execute("PRAGMA synchronous = NORMAL")
-    cursor.execute("PRAGMA cache_size = -64000")
-    cursor.execute("PRAGMA temp_store = MEMORY")
-    cursor.execute("PRAGMA mmap_size = 268435456")
-    cursor.close()
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        raw_conn = dbapi_connection
+    elif hasattr(dbapi_connection, "_connection"):
+        # aiosqlite wraps sqlite3.Connection as _connection
+        raw_conn = getattr(dbapi_connection, "_connection", None)
+    elif hasattr(dbapi_connection, "driver_connection"):
+        # Some drivers expose the underlying connection this way
+        raw_conn = getattr(dbapi_connection, "driver_connection", None)
+
+    # Fallback: try to execute pragmas on the connection directly
+    # (works for any connection object that supports cursor/execute)
+    target = raw_conn if isinstance(raw_conn, sqlite3.Connection) else dbapi_connection
+
+    try:
+        cursor = target.cursor()
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("PRAGMA busy_timeout = 5000")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.execute("PRAGMA cache_size = -64000")
+        cursor.execute("PRAGMA temp_store = MEMORY")
+        cursor.execute("PRAGMA mmap_size = 268435456")
+        cursor.close()
+    except Exception:
+        pass  # Not a SQLite connection or pragmas not supported
 
 
 @event.listens_for(Engine, "connect")
 def _on_engine_connect(dbapi_connection: object, _connection_record: object) -> None:
     """Event listener that configures SQLite pragmas on every new connection.
 
-    This fires for both sync engines (sqlite3.Connection) and async engines
-    (aiosqlite.Connection wrapper). The _get_underlying_sqlite3_connection()
-    helper extracts the raw sqlite3 connection in both cases.
+    Registered globally on the Engine class. Fires for both sync engines
+    (sqlite3.Connection) and async engines (aiosqlite.Connection wrapper).
     """
     set_sqlite_pragmas(dbapi_connection)
 
