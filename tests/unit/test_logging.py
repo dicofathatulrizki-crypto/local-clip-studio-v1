@@ -5,11 +5,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from io import StringIO
-from pathlib import Path
-
-import pytest
 
 from backend.infrastructure.logging.correlation import (
     get_correlation_id,
@@ -127,8 +122,8 @@ class TestConfigureLogging:
     def test_configure_logging_defaults(self) -> None:
         """Logging should be configurable with defaults."""
         configure_logging(level="DEBUG", log_format="json")
-        logger = get_logger("test")
-        assert logger.level == logging.DEBUG
+        root = logging.getLogger()
+        assert root.level == logging.DEBUG
 
     def test_logging_to_stringio(self) -> None:
         """Log output should be valid JSON when format is 'json'."""

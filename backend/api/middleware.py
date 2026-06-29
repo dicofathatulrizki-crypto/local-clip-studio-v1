@@ -11,15 +11,14 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.config.settings import get_settings
-from backend.infrastructure.errors import AppError, format_error_response
 from backend.infrastructure.logging.correlation import get_request_id, set_request_id
 from backend.infrastructure.logging.logger import get_logger
 

@@ -45,7 +45,7 @@ def create_app() -> FastAPI:
                 "version": "1.0.0",
                 "api_host": settings.api.host,
                 "api_port": settings.api.port,
-                "storage_path": str(settings.storage.app_directory),
+                "storage_path": str(settings.app_directory),
                 "log_level": settings.logging.level,
             },
         )

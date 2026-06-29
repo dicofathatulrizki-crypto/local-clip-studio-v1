@@ -11,16 +11,12 @@ Thread-safe with caching and reload capability.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from backend.config.defaults import ALL_DEFAULTS
-
 
 # ─── Sub-Models ─────────────────────────────────────────────────
 
@@ -128,7 +124,7 @@ class Settings(BaseSettings):
     config_file_path: str = str(Path.home() / ".localclip" / "config" / "settings.json")
     providers_file_path: str = str(Path.home() / ".localclip" / "config" / "providers.json")
 
-    def get_category(self, category: str) -> dict:
+    def get_category(self, category: str) -> dict[str, object]:
         """Get settings dictionary for a specific category."""
         category_map = {
             "general": self.general,
@@ -146,7 +142,7 @@ class Settings(BaseSettings):
             raise KeyError(f"Unknown settings category: {category}")
         return model.model_dump()
 
-    def update_category(self, category: str, updates: dict) -> dict:
+    def update_category(self, category: str, updates: dict[str, object]) -> dict[str, object]:
         """Update a settings category with partial merge semantics."""
         category_map = {
             "general": "general",
@@ -227,7 +223,7 @@ def _load_settings() -> Settings:
                         except KeyError:
                             pass  # Unknown category, skip
             return settings
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             # Log and use defaults
             import logging
             logging.warning(f"Failed to load config file: {e}. Using defaults.")

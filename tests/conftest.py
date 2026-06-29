@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
-from typing import AsyncGenerator, Generator
 
 import pytest
 import pytest_asyncio
 
-from backend.config.settings import Settings, get_settings, reload_settings
+from backend.config.settings import Settings, reload_settings
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -9,7 +9,7 @@ Defines a structured error system with:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -273,6 +273,8 @@ class AppError(Exception):
     (or a subclass) to ensure proper logging and user-facing error messages.
     """
 
+    catalog_entry: ErrorCatalogEntry | None
+
     def __init__(
         self,
         code: str,
@@ -286,17 +288,17 @@ class AppError(Exception):
         self.original_exception = original_exception
 
         # Look up error from catalog
-        catalog_entry = error_catalog.get(code)
-        if catalog_entry:
-            self.catalog_entry = catalog_entry
-            self.http_status = http_status or catalog_entry.http_status
+        entry = error_catalog.get(code)
+        if entry is not None:
+            self.catalog_entry = entry
+            self.http_status = http_status or entry.http_status
             # Format message with details
             if message:
                 self.message = message
             else:
-                self.message = catalog_entry.message.format(**self.details)
+                self.message = entry.message.format(**self.details)
         else:
-            self.catalog_entry = None
+            self.catalog_entry = None  # type: ignore[assignment]
             self.http_status = http_status or 500
             self.message = message or f"Unknown error: {code}"
 
@@ -318,7 +320,7 @@ def format_error_response(error: AppError) -> dict:
             "message": error.message,
             "details": error.details,
             "request_id": get_request_id(),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     }
 

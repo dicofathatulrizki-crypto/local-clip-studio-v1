@@ -9,8 +9,6 @@ Uses the `cryptography` library for Fernet (AES-256-CBC with HMAC) encryption.
 from __future__ import annotations
 
 import base64
-import hashlib
-import json
 import os
 import platform
 from pathlib import Path
@@ -19,7 +17,6 @@ from threading import Lock
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
 
 # ─── Key Derivation ─────────────────────────────────────────────
 
@@ -41,7 +38,7 @@ def _get_machine_secret() -> bytes:
         try:
             with open("/etc/machine-id") as f:
                 parts.append(f.read().strip())
-        except IOError:
+        except OSError:
             pass
 
     return "|".join(parts).encode("utf-8")
@@ -127,7 +124,7 @@ class APIKeyEncryption:
         token = fernet.decrypt(ciphertext.encode("utf-8"))
         return token.decode("utf-8")
 
-    def encrypt_dict(self, data: dict) -> dict:
+    def encrypt_dict(self, data: dict[str, object]) -> dict[str, object]:
         """Encrypt all string values in a dictionary (for API keys in provider config)."""
         result = {}
         for key, value in data.items():
@@ -137,7 +134,7 @@ class APIKeyEncryption:
                 result[key] = value
         return result
 
-    def decrypt_dict(self, data: dict) -> dict:
+    def decrypt_dict(self, data: dict[str, object]) -> dict[str, object]:
         """Decrypt all string values in a dictionary."""
         result = {}
         for key, value in data.items():

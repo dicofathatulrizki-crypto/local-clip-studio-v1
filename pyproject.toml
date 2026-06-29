@@ -111,7 +111,6 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "double"
-indent-width = 4
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

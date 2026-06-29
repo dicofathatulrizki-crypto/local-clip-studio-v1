@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from backend.config.defaults import ALL_DEFAULTS
 from backend.config.settings import (
     Settings,
     get_settings,
@@ -63,7 +62,7 @@ class TestSettingsDefaults:
         assert test_settings.api.host == "0.0.0.0"
         assert test_settings.api.port == 8765
         assert test_settings.api.reload is True
-        assert "localhost:5173" in test_settings.api.cors_origins
+        assert "http://localhost:5173" in test_settings.api.cors_origins
 
     def test_logging_defaults(self, test_settings: Settings) -> None:
         """Logging settings should have correct defaults."""

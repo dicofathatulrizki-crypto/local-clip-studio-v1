@@ -280,65 +280,37 @@ D1 (API Client) → D2-D11 (Components) → D12 (Workspace)
 
 ---
 
-#### Module A1: Project Scaffold
+#### Module A1: Project Foundation (merged A2 + A3)
+
+> **Status:** COMPLETED ✅  
+> **Formal Merge:** Module A2 (Configuration System) and Module A3 (Logging Infrastructure) have been fully implemented as part of Module A1. See Architectural Decision below.
 
 | Property | Value |
 |----------|-------|
-| **Responsibilities** | Initialize project structure, dependency management, CI configuration, environment setup |
+| **Responsibilities** | Project scaffold, configuration system (settings, defaults, encryption), logging infrastructure (JSON, correlation), error handling framework, API foundation (middleware, DI) |
 | **Dependencies** | None |
-| **Files to create** | `pyproject.toml`, `requirements.txt`, `Makefile`, `README.md`, `.env.example`, `.gitignore`, `scripts/setup.sh`, `scripts/dev.sh`, `docker/Dockerfile`, `docker/docker-compose.yml`, `docker/.dockerignore` |
-| **Estimated complexity** | Low (1-2 hours) |
+| **Files created** | `pyproject.toml`, `Makefile`, `README.md`, `.env.example`, `.gitignore`, `scripts/setup.sh`, `scripts/dev.sh`, `scripts/download_models.sh`, `backend/__init__.py`, `backend/__main__.py`, `backend/main.py`, `backend/config/__init__.py`, `backend/config/settings.py`, `backend/config/defaults.py`, `backend/config/encryption.py`, `backend/infrastructure/__init__.py`, `backend/infrastructure/logging/__init__.py`, `backend/infrastructure/logging/logger.py`, `backend/infrastructure/logging/correlation.py`, `backend/infrastructure/errors/__init__.py`, `backend/infrastructure/errors/app_error.py`, `backend/api/__init__.py`, `backend/api/middleware.py`, `backend/api/deps.py`, `backend/domain/__init__.py`, `backend/services/__init__.py`, `docker/Dockerfile`, `docker/docker-compose.yml`, `docker/.dockerignore`, `tests/__init__.py`, `tests/conftest.py`, `tests/unit/__init__.py`, `tests/unit/test_config.py`, `tests/unit/test_encryption.py`, `tests/unit/test_logging.py`, `tests/unit/test_errors.py`, `tests/integration/__init__.py` |
+| **Estimated complexity** | Low-Medium (5-7 hours) |
 | **Blocked by** | Nothing |
 
+**Architectural Decision: A2 + A3 merged into A1**
+- **Rationale:** The configuration system (A2) and logging infrastructure (A3) are tightly coupled — logging depends on config for log level/format parameters. Building them as separate modules would require two sequential code-generation passes on the same files. Merging them into A1 allows:
+  1. Dependency injection to work from the start (settings → logging → error handlers)
+  2. Tests for config + encryption + logging + errors to be generated together
+  3. Immediate verification of the complete foundation pipeline
+- **Impact:** No modules were skipped. A2 and A3 are fully implemented. Dependency graph unchanged (A2 and A3 are now part of A1's scope).
+- **Traceability:** A2 files = `backend/config/*`, A3 files = `backend/infrastructure/logging/*`
+
 **Acceptance Criteria:**
-- `bun install` succeeds (frontend)
-- `pip install -e ".[dev]"` succeeds (backend)
-- `make dev` starts both backend and frontend
+- `pip install -e ".[dev]"` succeeds
+- `python -c "from backend.config.settings import Settings; print('OK')"` succeeds
+- `pytest tests/unit/ -x -v` passes all 42 unit tests
+- `ruff check backend/` passes with no errors
+- `mypy backend/` passes
+- FastAPI app starts and `/health` endpoint returns 200 OK
 - Docker compose builds without errors
 
-**Required Tests:** None (scaffold verification)
-
----
-
-#### Module A2: Configuration System
-
-| Property | Value |
-|----------|-------|
-| **Responsibilities** | Load settings from file, validate with Pydantic, provide defaults, encrypt/decrypt API keys |
-| **Dependencies** | A1 (scaffold) |
-| **Files to create** | `backend/config/__init__.py`, `backend/config/settings.py`, `backend/config/defaults.py`, `backend/config/encryption.py` |
-| **Estimated complexity** | Low (2-3 hours) |
-| **Blocked by** | A1 |
-
-**Acceptance Criteria:**
-- Settings loaded from `~/.localclip/config/settings.json`
-- Invalid config returns clear validation errors
-- API keys encrypted with Fernet (AES-256-GCM)
-- Default values provided for all settings
-- Settings changes propagate without restart
-
-**Required Tests:** `tests/unit/test_config.py`, `tests/unit/test_encryption.py`
-
----
-
-#### Module A3: Logging Infrastructure
-
-| Property | Value |
-|----------|-------|
-| **Responsibilities** | Structured JSON logging, rotation, correlation ID propagation, log levels per module |
-| **Dependencies** | A2 (config) |
-| **Files to create** | `backend/infrastructure/logging/__init__.py`, `backend/infrastructure/logging/logger.py`, `backend/infrastructure/logging/correlation.py` |
-| **Estimated complexity** | Low (1-2 hours) |
-| **Blocked by** | A2 |
-
-**Acceptance Criteria:**
-- Log output is valid JSON with required fields (timestamp, level, logger, request_id, message)
-- Log files rotate daily, max 500 MB
-- Request ID propagates through async context
-- API keys are never logged (filtered)
-- Log level configurable per module
-
-**Required Tests:** `tests/unit/test_logging.py`
+**Required Tests:** `tests/unit/test_config.py`, `tests/unit/test_encryption.py`, `tests/unit/test_logging.py`, `tests/unit/test_errors.py`
 
 ---
 

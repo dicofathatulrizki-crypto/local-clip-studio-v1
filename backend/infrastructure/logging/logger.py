@@ -12,15 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
 from backend.infrastructure.logging.correlation import get_correlation_id, get_request_id
-
 
 # ─── Sensitive Data Filter ──────────────────────────────────────
 
@@ -66,7 +64,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_entry: dict[str, Any] = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -82,7 +80,7 @@ class JSONFormatter(logging.Formatter):
             }
 
         # Add extra fields from record
-        extra = getattr(record, "extra", None) or {}
+        extra: dict[str, Any] = getattr(record, "extra", None) or {}
         if hasattr(record, "task_name"):
             extra["task_name"] = record.task_name
         if hasattr(record, "task_id"):

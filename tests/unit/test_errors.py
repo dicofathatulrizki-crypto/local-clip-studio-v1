@@ -3,8 +3,6 @@ Tests for the error handling framework (backend/infrastructure/errors/).
 """
 from __future__ import annotations
 
-import pytest
-
 from backend.infrastructure.errors import (
     AppError,
     ErrorSeverity,

@@ -5,8 +5,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from backend.config.encryption import (
     APIKeyEncryption,
     decrypt_api_key,
@@ -62,7 +60,7 @@ class TestAPIKeyEncryption:
         assert decrypted == "cross-instance-test"
 
     def test_encrypt_dict(self, temp_dir: Path) -> None:
-        """encrypt_dict should encrypt string values only."""
+        """encrypt_dict should encrypt all string values."""
         encryption = APIKeyEncryption(config_dir=temp_dir)
         data = {
             "api_key": "sk-secret-123",
@@ -71,8 +69,10 @@ class TestAPIKeyEncryption:
             "enabled": True,
         }
         result = encryption.encrypt_dict(data)
+        # All string values are encrypted (not just api_key)
         assert result["api_key"].startswith("gAAAAA")
-        assert result["model"] == "gpt-4"
+        assert result["model"].startswith("gAAAAA")
+        # Non-string values remain unchanged
         assert result["temperature"] == 0.7
         assert result["enabled"] is True
 
@@ -80,9 +80,10 @@ class TestAPIKeyEncryption:
         """decrypt_dict should decrypt Fernet-encrypted values."""
         encryption = APIKeyEncryption(config_dir=temp_dir)
         encrypted_key = encryption.encrypt("my-secret-key")
+        encrypted_model = encryption.encrypt("gpt-4")
         data = {
             "api_key": encrypted_key,
-            "model": "gpt-4",
+            "model": encrypted_model,
         }
         result = encryption.decrypt_dict(data)
         assert result["api_key"] == "my-secret-key"

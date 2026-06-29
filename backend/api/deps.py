@@ -13,13 +13,15 @@ constructor injection, never instantiated directly by services.
 """
 from __future__ import annotations
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
-from fastapi import Request
+from backend.config.encryption import APIKeyEncryption, get_encryption
 
-from backend.config.encryption import get_encryption, APIKeyEncryption
-from backend.config.settings import Settings, get_settings, reload_settings
-from backend.infrastructure.logging.correlation import get_request_id, set_request_id
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+from backend.config.settings import Settings, get_settings
+from backend.infrastructure.logging.correlation import get_request_id
 from backend.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -65,38 +67,44 @@ async def get_db_session() -> AsyncGenerator[None, None]:
 
 def get_project_service() -> None:
     """Placeholder — will be implemented in Module B5."""
-    raise NotImplementedError("ProjectService not yet implemented")
+    msg = "ProjectService not yet implemented"
+    raise NotImplementedError(msg)
 
 
 def get_import_service() -> None:
     """Placeholder — will be implemented in Module B6."""
-    raise NotImplementedError("ImportService not yet implemented")
+    msg = "ImportService not yet implemented"
+    raise NotImplementedError(msg)
 
 
 def get_pipeline_service() -> None:
     """Placeholder — will be implemented in Module C4."""
-    raise NotImplementedError("PipelineService not yet implemented")
+    msg = "PipelineService not yet implemented"
+    raise NotImplementedError(msg)
 
 
 def get_export_service() -> None:
     """Placeholder — will be implemented in Module C8."""
-    raise NotImplementedError("ExportService not yet implemented")
+    msg = "ExportService not yet implemented"
+    raise NotImplementedError(msg)
 
 
 def get_settings_service() -> None:
     """Placeholder — will be implemented in Module B7."""
-    raise NotImplementedError("SettingsService not yet implemented")
+    msg = "SettingsService not yet implemented"
+    raise NotImplementedError(msg)
 
 
 def get_provider_service() -> None:
     """Placeholder — will be implemented in Module B8."""
-    raise NotImplementedError("ProviderService not yet implemented")
+    msg = "ProviderService not yet implemented"
+    raise NotImplementedError(msg)
 
 
 # ─── Router Registration Helper ─────────────────────────────────
 
 
-def register_routes(app: "FastAPI") -> None:
+def register_routes(app: FastAPI) -> None:
     """Register all API route modules.
 
     Placeholder — routes will be added as modules B10 and C10.
