@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from backend.infrastructure.database.base import Base, UUIDMixin
 
@@ -52,10 +53,10 @@ class ProcessingQueue(Base, UUIDMixin):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     payload: Mapped[dict | None] = mapped_column(
-        "payload", type_="JSON", nullable=True, default=None  # type: ignore[arg-type]
+        JSON, nullable=True, default=None
     )
     result: Mapped[dict | None] = mapped_column(
-        "result", type_="JSON", nullable=True, default=None  # type: ignore[arg-type]
+        JSON, nullable=True, default=None
     )
     error_message: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None

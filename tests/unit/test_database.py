@@ -5,13 +5,16 @@ Tests use SQLite in-memory database with async sessions.
 """
 from __future__ import annotations
 
+import uuid
+
 import pytest
-from sqlalchemy import select
+from sqlalchemy import Integer, String, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.infrastructure.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from backend.infrastructure.database.repositories.base import BaseRepository
@@ -23,14 +26,8 @@ class TestModel(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """Test model for repository tests."""
     __tablename__ = "test_model"
 
-    name: str = ...  # type: ignore[assignment]
-    value: int = ...  # type: ignore[assignment]
-
-
-import sqlalchemy as sa  # noqa: E402
-
-TestModel.name = sa.Column(sa.String(255), nullable=False)  # type: ignore[attr-defined]
-TestModel.value = sa.Column(sa.Integer, nullable=False, default=0)  # type: ignore[attr-defined]
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 # ─── Async Fixtures ─────────────────────────────────────────────
@@ -73,16 +70,16 @@ class TestUUIDMixin:
 
     async def test_uuid_provided_explicit(self, memory_session: AsyncSession) -> None:
         """Custom UUID should be accepted."""
-        model = TestModel(id="custom-id-123456789012345678901234567", name="test", value=42)
+        custom_id = str(uuid.uuid4())
+        model = TestModel(id=custom_id, name="test", value=42)
         memory_session.add(model)
         await memory_session.flush()
-        assert model.id == "custom-id-123456789012345678901234567"
+        assert model.id == custom_id
 
 
 # ─── Base Repository Tests ──────────────────────────────────────
 
 
-@pytest.mark.asyncio
 class TestBaseRepository:
     """Test generic CRUD operations via BaseRepository."""
 

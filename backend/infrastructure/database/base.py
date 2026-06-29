@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Integer, event
+from sqlalchemy import DateTime, Integer, String, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -21,11 +21,40 @@ from sqlalchemy.sql import func
 # ─── SQLite Optimizations ───────────────────────────────────────
 
 
-@event.listens_for(Engine, "connect")
-def _set_sqlite_pragma(dbapi_connection: object, _connection_record: object) -> None:
+def _get_underlying_sqlite3_connection(
+    dbapi_connection: object,
+) -> object | None:
+    """Get the raw sqlite3.Connection from various SQLite driver wrappers.
+
+    Handles:
+    - Direct sqlite3.Connection (sync engine)
+    - aiosqlite.Connection (async engine, wraps sqlite3.Connection internally)
+    - Any other object that might wrap sqlite3
+
+    Returns the sqlite3.Connection or None if not found.
+    """
+    import sqlite3
+
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        return dbapi_connection
+
+    # Check for aiosqlite-style wrapper (private _connection attr)
+    raw = getattr(dbapi_connection, "_connection", None)
+    if isinstance(raw, sqlite3.Connection):
+        return raw
+
+    # Check for driver_connection attribute (used by some drivers)
+    raw = getattr(dbapi_connection, "driver_connection", None)
+    if isinstance(raw, sqlite3.Connection):
+        return raw
+
+    return None
+
+
+def set_sqlite_pragmas(dbapi_connection: object) -> None:
     """Configure SQLite connection pragmas for performance and safety.
 
-    Applied automatically to every new SQLite connection:
+    Applied to every new SQLite connection:
     - WAL mode: better concurrent read performance
     - Foreign keys: enforce referential integrity
     - Busy timeout: wait 5s instead of failing immediately
@@ -34,12 +63,11 @@ def _set_sqlite_pragma(dbapi_connection: object, _connection_record: object) -> 
     - Temp store: in-memory for temp tables
     - Memory-map: 256MB for faster reads
     """
-    import sqlite3
-
-    if not isinstance(dbapi_connection, sqlite3.Connection):
+    conn = _get_underlying_sqlite3_connection(dbapi_connection)
+    if conn is None:
         return
 
-    cursor = dbapi_connection.cursor()
+    cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode = WAL")
     cursor.execute("PRAGMA foreign_keys = ON")
     cursor.execute("PRAGMA busy_timeout = 5000")
@@ -48,6 +76,17 @@ def _set_sqlite_pragma(dbapi_connection: object, _connection_record: object) -> 
     cursor.execute("PRAGMA temp_store = MEMORY")
     cursor.execute("PRAGMA mmap_size = 268435456")
     cursor.close()
+
+
+@event.listens_for(Engine, "connect")
+def _on_engine_connect(dbapi_connection: object, _connection_record: object) -> None:
+    """Event listener that configures SQLite pragmas on every new connection.
+
+    This fires for both sync engines (sqlite3.Connection) and async engines
+    (aiosqlite.Connection wrapper). The _get_underlying_sqlite3_connection()
+    helper extracts the raw sqlite3 connection in both cases.
+    """
+    set_sqlite_pragmas(dbapi_connection)
 
 
 # ─── Declarative Base ───────────────────────────────────────────
@@ -68,7 +107,7 @@ class UUIDMixin:
     """
 
     id: Mapped[str] = mapped_column(
-        String(36),  # type: ignore[name-defined]
+        String(36),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
@@ -104,7 +143,7 @@ class SoftDeleteMixin:
     """
 
     is_archived: Mapped[bool] = mapped_column(
-        Integer,  # type: ignore[name-defined]
+        Integer,
         nullable=False,
         default=0,
         server_default="0",
@@ -120,13 +159,7 @@ class SoftDeleteMixin:
         self.is_archived = True
         self.archived_at = datetime.now(UTC)
 
-
-# ─── Type import workaround ─────────────────────────────────────
-# SQLAlchemy mapped_column uses String, Integer inline.
-# We must import them here for the mixin class bodies to work.
-# This is the standard pattern used in SQLAlchemy 2.0 docs.
-
-from sqlalchemy import Integer as _I, String as _S  # noqa: E402, F401
-
-String = _S
-Integer = _I
+    def restore(self) -> None:
+        """Restore this record from archived state."""
+        self.is_archived = False
+        self.archived_at = None

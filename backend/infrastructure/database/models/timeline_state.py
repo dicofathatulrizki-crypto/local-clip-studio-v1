@@ -7,13 +7,15 @@ The timeline is stored as JSON tracks and markers for flexible editing.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from backend.infrastructure.database.base import Base, UUIDMixin
 
-if TYPE_CHECKING:  # noqa: FIX002  # intentional TYPE_CHECKING guard
+if TYPE_CHECKING:
     from backend.infrastructure.database.models.project import Project
 
 
@@ -37,10 +39,10 @@ class TimelineState(Base, UUIDMixin):
         nullable=False,
     )
     tracks: Mapped[list] = mapped_column(
-        "tracks", type_="JSON", nullable=False, default=list  # type: ignore[arg-type]
+        JSON, nullable=False, default=list
     )
     markers: Mapped[list] = mapped_column(
-        "markers", type_="JSON", nullable=False, default=list  # type: ignore[arg-type]
+        JSON, nullable=False, default=list
     )
     zoom_level: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     playhead_position_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

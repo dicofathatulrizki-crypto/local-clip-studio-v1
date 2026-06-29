@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
 
 from backend.infrastructure.database.base import Base
 
@@ -29,10 +30,10 @@ class ProviderConfig(Base):
         Boolean, nullable=False, default=False, server_default="0"
     )
     config: Mapped[dict] = mapped_column(
-        "config", type_="JSON", nullable=False, default=dict  # type: ignore[arg-type]
+        JSON, nullable=False, default=dict
     )
     task_routing: Mapped[dict] = mapped_column(
-        "task_routing", type_="JSON", nullable=False, default=dict  # type: ignore[arg-type]
+        JSON, nullable=False, default=dict
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

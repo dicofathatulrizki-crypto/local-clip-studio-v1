@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from backend.infrastructure.database.base import Base, UUIDMixin
 
@@ -50,7 +51,7 @@ class ClipCandidate(Base, UUIDMixin):
     title: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     hashtags: Mapped[list | None] = mapped_column(
-        "hashtags", type_="JSON", nullable=True, default=None  # type: ignore[arg-type]
+        JSON, nullable=True, default=None
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="candidate", index=True

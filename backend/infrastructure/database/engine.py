@@ -141,17 +141,26 @@ class DatabaseManager:
             self._initialized = False
             logger.info("Database engine disposed")
 
+    @property
+    def is_initialized(self) -> bool:
+        """Check if the database engine has been initialized."""
+        return self._initialized
+
+    @property
+    def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        """Get the async session factory."""
+        if self._async_session_factory is None:
+            msg = "Database not initialized. Call initialize() first."
+            raise RuntimeError(msg)
+        return self._async_session_factory
+
     async def get_session(self) -> AsyncSession:
         """Get a new async database session.
 
         Caller is responsible for committing/rolling back and closing.
         Prefer using the context manager get_async_session() instead.
         """
-        if not self._initialized or self._async_session_factory is None:
-            msg = "Database not initialized. Call initialize() first."
-            raise RuntimeError(msg)
-
-        return self._async_session_factory()
+        return self.session_factory()
 
     def get_sync_session(self) -> Session:
         """Get a new sync database session (for legacy/script usage)."""
@@ -300,10 +309,10 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             ...
     """
     db = get_db_manager()
-    if not db._initialized:  # noqa: SLF001
+    if not db.is_initialized:
         await init_database()
 
-    async with db._async_session_factory() as session:  # noqa: SLF001
+    async with db.session_factory() as session:
         try:
             yield session
             await session.commit()

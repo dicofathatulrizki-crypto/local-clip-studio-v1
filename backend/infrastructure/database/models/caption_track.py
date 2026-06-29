@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from backend.infrastructure.database.base import Base, UUIDMixin
 
@@ -39,10 +40,10 @@ class CaptionTrack(Base, UUIDMixin):
         String(10), nullable=False, default="en"
     )
     style: Mapped[dict | None] = mapped_column(
-        "style", type_="JSON", nullable=True, default=None  # type: ignore[arg-type]
+        JSON, nullable=True, default=None
     )
     captions: Mapped[list] = mapped_column(
-        "captions", type_="JSON", nullable=False, default=list  # type: ignore[arg-type]
+        JSON, nullable=False, default=list
     )
     is_source_language: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1"
