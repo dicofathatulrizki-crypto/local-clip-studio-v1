@@ -1,0 +1,1 @@
+"""Integration tests for the Hardware Abstraction Layer."""
