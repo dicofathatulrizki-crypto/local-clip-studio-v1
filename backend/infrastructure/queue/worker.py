@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import signal
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 from backend.infrastructure.queue.exceptions import (
     WorkerNotRunningError,
@@ -195,7 +193,7 @@ class Worker:
                     self._current_task,
                     timeout=self._shutdown_timeout,
                 )
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 logger.warning(
                     "Worker %s current job did not stop within shutdown timeout",
                     self.worker_id,

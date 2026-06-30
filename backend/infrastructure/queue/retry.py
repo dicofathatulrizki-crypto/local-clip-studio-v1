@@ -10,17 +10,12 @@ Handles:
 
 from __future__ import annotations
 
-import asyncio
-import time
-from collections.abc import Callable
 from typing import Any
 
 from backend.infrastructure.logging.logger import get_logger
 from backend.infrastructure.queue.models import (
-    JobPriority,
     JobRecord,
     JobStatus,
-    RetryPolicy,
     TaskDefinition,
 )
 

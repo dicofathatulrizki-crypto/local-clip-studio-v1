@@ -16,36 +16,39 @@ Architecture:
 - Pure infrastructure layer — no business logic
 - Integrates with all Phase A modules
 - Progress events emitted via B3 WebSocket Manager
-- Domain events raised for job lifecycle changes
+- Queue events raised for job lifecycle changes
 """
 
 from __future__ import annotations
 
 from backend.infrastructure.queue.cancellation import CancellationManager
 from backend.infrastructure.queue.dispatcher import Dispatcher
-from backend.infrastructure.queue.events import QueueEventBus
+from backend.infrastructure.queue.events import QueueEvent, QueueEventType
 from backend.infrastructure.queue.exceptions import (
-    JobCancellationError,
+    CancellationError,
+    DispatcherFullError,
+    DuplicateJobError,
     JobNotFoundError,
-    JobTimeoutError,
-    QueueFullError,
     QueueError,
-    ResourceLockError,
-    WorkerBusyError,
+    QueueFullError,
+    ResourceLockedError,
+    WorkerNotRunningError,
+    WorkerTimeoutError,
 )
 from backend.infrastructure.queue.health import HealthMonitor
 from backend.infrastructure.queue.metrics import MetricsCollector
 from backend.infrastructure.queue.models import (
+    JobMetadata,
     JobPriority,
-    JobRecord,
     JobStatus,
+    QueueItem,
     QueuedJob,
     QueueSettings,
     RetryPolicy,
     TaskDefinition,
 )
 from backend.infrastructure.queue.priority import PriorityQueue
-from backend.infrastructure.queue.progress import QueueProgressReporter
+from backend.infrastructure.queue.progress import ProgressTracker, ProgressReporter
 from backend.infrastructure.queue.retry import RetryManager
 from backend.infrastructure.queue.scheduler import Scheduler
 from backend.infrastructure.queue.task_registry import TaskRegistry
@@ -57,26 +60,31 @@ __all__ = [
     "HealthMonitor",
     "MetricsCollector",
     "PriorityQueue",
-    "QueueEventBus",
-    "QueueProgressReporter",
+    "ProgressTracker",
+    "ProgressReporter",
+    "QueueEvent",
+    "QueueEventType",
     "RetryManager",
     "Scheduler",
     "TaskRegistry",
     "WorkerPool",
     # Models
+    "JobMetadata",
     "JobPriority",
-    "JobRecord",
     "JobStatus",
+    "QueueItem",
     "QueuedJob",
     "QueueSettings",
     "RetryPolicy",
     "TaskDefinition",
     # Exceptions
-    "JobCancellationError",
+    "CancellationError",
+    "DispatcherFullError",
+    "DuplicateJobError",
     "JobNotFoundError",
-    "JobTimeoutError",
     "QueueError",
     "QueueFullError",
-    "ResourceLockError",
-    "WorkerBusyError",
+    "ResourceLockedError",
+    "WorkerNotRunningError",
+    "WorkerTimeoutError",
 ]

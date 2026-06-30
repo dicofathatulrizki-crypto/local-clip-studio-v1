@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import heapq
-from collections.abc import Sequence
 from typing import Any
 
 from backend.infrastructure.logging.logger import get_logger

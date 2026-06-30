@@ -19,13 +19,7 @@ from celery.signals import (
     task_success,
 )
 
-from backend.infrastructure.queue.events import QueueEvent, QueueEventType
-from backend.infrastructure.queue.models import (
-    JobMetadata,
-    JobPriority,
-    JobStatus,
-    QueueItem,
-)
+from backend.infrastructure.queue.events import QueueEvent
 
 logger = logging.getLogger(__name__)
 

@@ -10,17 +10,10 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
-from backend.infrastructure.queue.exceptions import (
-    DispatcherFullError,
-    ResourceLockedError,
-)
 from backend.infrastructure.queue.models import (
-    JobMetadata,
-    JobPriority,
     JobStatus,
     QueueItem,
 )

@@ -1,18 +1,19 @@
 """Queue data models and type definitions.
 
 Defines:
-- JobRecord and QueuedJob for job tracking
+- JobRecord and QueueItem for job tracking
 - JobPriority and JobStatus enums
 - RetryPolicy for configurable retry behavior
 - TaskDefinition for job type registration
 - QueueSettings for configuration
+- JobMetadata for metadata transfer objects
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum, auto
+from datetime import UTC, datetime
+from enum import Enum
 from typing import Any
 
 
@@ -21,9 +22,26 @@ class JobPriority(int, Enum):
 
     CRITICAL = 100
     HIGH = 75
+    MEDIUM = 50
     NORMAL = 50
     LOW = 25
     BACKGROUND = 0
+
+    @classmethod
+    def DEFAULT(cls) -> JobPriority:
+        """Return the default priority level."""
+        return cls.MEDIUM
+
+    @classmethod
+    def from_int(cls, value: int) -> JobPriority:
+        """Get closest priority enum from an integer value."""
+        if value >= 75:
+            return cls.CRITICAL
+        if value >= 50:
+            return cls.HIGH
+        if value >= 25:
+            return cls.MEDIUM
+        return cls.LOW
 
 
 class JobStatus(str, Enum):
@@ -37,6 +55,39 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"
     RETRYING = "retrying"
     TIMEOUT = "timeout"
+
+    @property
+    def is_terminal(self) -> bool:
+        """Check if this is a terminal state."""
+        return self in (self.COMPLETED, self.FAILED, self.CANCELLED, self.TIMEOUT)
+
+    @property
+    def is_active(self) -> bool:
+        """Check if the job is actively processing."""
+        return self in (self.QUEUED, self.RUNNING)
+
+
+@dataclass
+class JobMetadata:
+    """Lightweight metadata transfer object for job creation."""
+
+    job_id: str
+    job_type: str
+    priority: JobPriority = JobPriority.MEDIUM
+    project_id: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_queue_item(self) -> QueueItem:
+        """Convert to a full QueueItem for queue processing."""
+        return QueueItem(
+            job_id=self.job_id,
+            job_type=self.job_type,
+            priority=self.priority,
+            status=JobStatus.PENDING,
+            payload=self.payload,
+            metadata=self.metadata,
+        )
 
 
 @dataclass
@@ -76,6 +127,34 @@ class RetryPolicy:
         jitter = random.uniform(0, delay * 0.1)
         return delay + jitter
 
+    @classmethod
+    def fixed(cls, delay: float = 5.0, max_retries: int = 3) -> RetryPolicy:
+        """Create a fixed-delay retry policy (backoff_multiplier=1)."""
+        return cls(
+            max_retries=max_retries,
+            base_delay_seconds=delay,
+            backoff_multiplier=1.0,
+        )
+
+    @classmethod
+    def exponential(cls, max_retries: int = 3, initial_delay: float = 1.0) -> RetryPolicy:
+        """Create an exponential backoff retry policy."""
+        return cls(
+            max_retries=max_retries,
+            base_delay_seconds=initial_delay,
+            backoff_multiplier=2.0,
+        )
+
+    @classmethod
+    def aggressive(cls) -> RetryPolicy:
+        """Create an aggressive retry policy (minimal retries)."""
+        return cls(max_retries=1, base_delay_seconds=0.5)
+
+    @classmethod
+    def no_retry(cls) -> RetryPolicy:
+        """Create a no-retry policy."""
+        return cls(max_retries=0)
+
 
 @dataclass
 class TaskDefinition:
@@ -108,7 +187,7 @@ class JobRecord:
     """
 
     job_id: str
-    task_type: str
+    job_type: str
     status: JobStatus = JobStatus.PENDING
     priority: JobPriority = JobPriority.NORMAL
     payload: dict[str, Any] = field(default_factory=dict)
@@ -117,7 +196,7 @@ class JobRecord:
     error_code: str = ""
     progress: float = 0.0
     progress_message: str = ""
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     completed_at: datetime | None = None
     scheduled_at: datetime | None = None
@@ -128,6 +207,7 @@ class JobRecord:
     requester_id: str = ""
     locked_resources: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    resources: list[str] | None = None
 
     @property
     def is_finished(self) -> bool:
@@ -149,7 +229,7 @@ class JobRecord:
         """Seconds since the job started, or 0 if not started."""
         if self.started_at is None:
             return 0.0
-        return (datetime.now(timezone.utc) - self.started_at).total_seconds()
+        return (datetime.now(UTC) - self.started_at).total_seconds()
 
     @property
     def timed_out(self) -> bool:
@@ -162,6 +242,10 @@ class JobRecord:
         return self.retry_count < self.max_retries and not self.is_finished
 
 
+# QueueItem is an alias for JobRecord — used as the primary name throughout codebase
+QueueItem = JobRecord
+
+
 @dataclass
 class QueuedJob:
     """A job ready for dispatch with resolved execution context.
@@ -172,7 +256,7 @@ class QueuedJob:
 
     record: JobRecord
     task_definition: TaskDefinition
-    enqueued_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    enqueued_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
