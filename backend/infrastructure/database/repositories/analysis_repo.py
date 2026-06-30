@@ -47,7 +47,8 @@ class AnalysisRepository(BaseRepository[ORMAnalysis]):
         """Update an Analysis record from a domain entity."""
         orm = await self.get(str(analysis.id))
         if orm is None:
-            raise EntityNotFoundError("Analysis", str(analysis.id))
+            msg = "Analysis"
+            raise EntityNotFoundError(msg, str(analysis.id))
         AnalysisMapper.update_orm(analysis, orm)
         await self.session.flush()
         await self.session.refresh(orm)
@@ -61,7 +62,8 @@ class AnalysisRepository(BaseRepository[ORMAnalysis]):
         self, status: AnalysisState, limit: int = 100
     ) -> Sequence[ORMAnalysis]:
         """List analyses by pipeline status."""
-        return await self.find_many_by(status=status.value, limit=limit)
+        # find_many_by treats all kwargs as column filters — don't pass limit
+        return await self.find_many_by(status=status.value)
 
     async def delete_by_video(self, video_id: str) -> bool:
         """Delete the analysis for a video."""

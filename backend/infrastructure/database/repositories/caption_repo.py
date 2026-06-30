@@ -37,7 +37,8 @@ class CaptionRepository(BaseRepository[ORMCaption]):
         """Update a CaptionTrack from a domain entity."""
         orm = await self.get(str(caption.id))
         if orm is None:
-            raise EntityNotFoundError("Caption", str(caption.id))
+            msg = "Caption"
+            raise EntityNotFoundError(msg, str(caption.id))
         CaptionMapper.update_orm(caption, orm)
         await self.session.flush()
         await self.session.refresh(orm)

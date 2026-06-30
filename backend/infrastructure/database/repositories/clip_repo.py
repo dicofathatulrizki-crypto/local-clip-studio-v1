@@ -41,7 +41,8 @@ class ClipRepository(BaseRepository[ORMClip]):
         """Update a ClipCandidate from a domain Clip entity."""
         orm = await self.get(str(clip.id))
         if orm is None:
-            raise EntityNotFoundError("Clip", str(clip.id))
+            msg = "Clip"
+            raise EntityNotFoundError(msg, str(clip.id))
         ClipMapper.update_orm(clip, orm)
         await self.session.flush()
         await self.session.refresh(orm)

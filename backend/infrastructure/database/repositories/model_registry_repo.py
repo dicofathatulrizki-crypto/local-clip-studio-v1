@@ -98,9 +98,11 @@ class ModelRegistryRepository(BaseRepository[ORMModel]):
         Returns:
             Updated model data dict
         """
-        orm = await self.get(model_id)
+        # ModelRegistry uses model_id as PK, not 'id' — use find_by
+        orm = await self.find_by(model_id=model_id)
         if orm is None:
-            raise EntityNotFoundError("ModelRegistry", model_id)
+            msg = "ModelRegistry"
+            raise EntityNotFoundError(msg, model_id)
         orm.status = status
         for key, value in kwargs.items():
             if hasattr(orm, key):

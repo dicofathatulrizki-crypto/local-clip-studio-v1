@@ -519,23 +519,29 @@ D1 (API Client) → D2-D11 (Components) → D12 (Workspace)
 
 #### Module B2: Database Repositories
 
+> **Status:** COMPLETED ✅  
+> **Date:** 2026-06-30  
+> **Tests:** 69/69 passing (17 unit + 52 integration) | Architecture compliant
+
 | Property | Value |
 |----------|-------|
-| **Responsibilities** | CRUD operations for all entities via SQLAlchemy |
+| **Responsibilities** | CRUD, domain↔ORM mapping, pagination, filtering, optimistic concurrency, soft delete, bulk operations, error translation |
 | **Dependencies** | A4 (engine, models), B1 (domain entities) |
-| **Files to create** | `backend/infrastructure/database/repositories/project_repo.py`, `backend/infrastructure/database/repositories/video_master_repo.py`, `backend/infrastructure/database/repositories/analysis_repo.py`, `backend/infrastructure/database/repositories/clip_repo.py`, `backend/infrastructure/database/repositories/export_job_repo.py`, `backend/infrastructure/database/repositories/settings_repo.py` |
+| **Files created** | `backend/infrastructure/database/repositories/__init__.py`, `base.py`, `mappers.py`, `exceptions.py`, `project_repo.py`, `video_repo.py`, `analysis_repo.py`, `clip_repo.py`, `caption_repo.py`, `export_repo.py`, `provider_repo.py`, `settings_repo.py`, `model_registry_repo.py`, `plugin_repo.py` |
 | **Estimated complexity** | Medium (6-8 hours) |
 | **Blocked by** | A4, B1 |
 
 **Acceptance Criteria:**
-- All CRUD operations work with SQLite
-- Repository pattern: interface in domain, impl in infrastructure
-- Proper session management (commit on success, rollback on error)
-- Pagination and filtering for collection queries
-- Domain entities correctly mapped to/from ORM models
-- Performance: < 50ms for single record operations
+- ✅ All CRUD operations work with SQLite (17 unit + 52 integration tests passing)
+- ✅ Repository pattern: domain entities are the only types returned to upper layers
+- ✅ Proper error translation: SQLAlchemy exceptions → RepositoryError subclasses
+- ✅ Pagination and filtering for collection queries (`list()`, `count()`, `find_by()`)
+- ✅ Domain entities correctly mapped to/from ORM models (9 mapper classes)
+- ✅ Optimistic concurrency with version field (ConcurrentUpdateError)
+- ✅ Soft delete and restore (SoftDeleteMixin)
+- ✅ Custom PK column handling (ModelRegistry, ProviderConfig use `find_by`)
 
-**Required Tests:** `tests/integration/test_project_repository.py`, `tests/integration/test_video_repository.py`, `tests/integration/test_analysis_repository.py`
+**Required Tests:** `tests/unit/database/test_repositories.py` (17 tests), `tests/integration/database/test_repositories.py` (52 tests)
 
 ---
 

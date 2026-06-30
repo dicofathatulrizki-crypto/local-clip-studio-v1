@@ -77,7 +77,8 @@ class ProjectRepository(BaseRepository[ORMProject]):
         """
         orm = await self.get(str(project.id))
         if orm is None:
-            raise EntityNotFoundError("Project", str(project.id))
+            msg = "Project"
+            raise EntityNotFoundError(msg, str(project.id))
         ProjectMapper.update_orm(project, orm)
         await self.session.flush()
         await self.session.refresh(orm)

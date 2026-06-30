@@ -38,7 +38,8 @@ class ExportRepository(BaseRepository[ORMExport]):
         """Update an ExportJob from a domain entity."""
         orm = await self.get(export.id)
         if orm is None:
-            raise EntityNotFoundError("Export", export.id)
+            msg = "Export"
+            raise EntityNotFoundError(msg, export.id)
         ExportMapper.update_orm(export, orm)
         await self.session.flush()
         await self.session.refresh(orm)

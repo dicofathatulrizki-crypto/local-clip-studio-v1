@@ -31,8 +31,12 @@ class ProviderRepository(BaseRepository[ORMProvider]):
         return ProviderMapper.to_domain(created)
 
     async def get_domain(self, provider_id: str) -> DomainProvider | None:
-        """Get a domain Provider by provider_id (PK)."""
-        orm = await self.get(provider_id)
+        """Get a domain Provider by provider_id (PK).
+
+        Note: ProviderConfig uses provider_id as PK, not 'id',
+        so we use find_by instead of get.
+        """
+        orm = await self.find_by(provider_id=provider_id)
         if orm is None:
             return None
         return ProviderMapper.to_domain(orm)
@@ -40,9 +44,10 @@ class ProviderRepository(BaseRepository[ORMProvider]):
     async def update_from_domain(self, provider: DomainProvider) -> DomainProvider:
         """Update a ProviderConfig from a domain entity."""
         pid = str(provider.id)
-        orm = await self.get(pid)
+        orm = await self.find_by(provider_id=pid)
         if orm is None:
-            raise EntityNotFoundError("Provider", pid)
+            msg = "Provider"
+            raise EntityNotFoundError(msg, pid)
         ProviderMapper.update_orm(provider, orm)
         await self.session.flush()
         await self.session.refresh(orm)

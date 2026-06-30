@@ -80,7 +80,8 @@ class VideoMasterRepository(BaseRepository[ORMVideoMaster]):
         """
         orm = await self.get(str(video.id))
         if orm is None:
-            raise EntityNotFoundError("VideoMaster", str(video.id))
+            msg = "VideoMaster"
+            raise EntityNotFoundError(msg, str(video.id))
         VideoMapper.update_orm(video, orm)
         await self.session.flush()
         await self.session.refresh(orm)

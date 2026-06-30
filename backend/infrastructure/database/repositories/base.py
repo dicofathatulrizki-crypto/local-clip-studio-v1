@@ -101,13 +101,15 @@ class BaseRepository(Generic[ModelT]):
             raise DuplicateEntityError(entity, constraint) from exc
 
         if "foreign key" in error_msg:
+            msg = f"Foreign key violation for {entity}"
             raise RepositoryIntegrityError(
-                f"Foreign key violation for {entity}",
+                msg,
                 {"entity": entity, "detail": str(exc)},
             ) from exc
 
+        msg = f"Database integrity error for {entity}"
         raise RepositoryIntegrityError(
-            f"Database integrity error for {entity}",
+            msg,
             {"entity": entity, "detail": str(exc)},
         ) from exc
 
@@ -118,8 +120,9 @@ class BaseRepository(Generic[ModelT]):
         if isinstance(exc, RepositoryError):
             raise
         entity = entity_type or self._table_name
+        msg = "ERR-REPO-UNEXPECTED"
         raise RepositoryError(
-            "ERR-REPO-UNEXPECTED",
+            msg,
             f"Unexpected error in {entity} repository: {exc}",
             {"entity": entity, "detail": str(exc)},
         ) from exc
