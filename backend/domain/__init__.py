@@ -1,17 +1,176 @@
+"""Domain Layer — Pure Python business logic with zero infrastructure dependencies.
+
+This package defines the core business model of Local Clip Studio:
+entities, value objects, aggregates, domain events, state machines, and exceptions.
+
+Architecture Rules:
+    - Zero imports from infrastructure (no SQLAlchemy, FastAPI, filesystem, etc.)
+    - Zero imports from external AI libraries
+    - Pure Python standard library only
+    - All business rules centralized here — never in services or API
 """
-Domain Layer for Local Clip Studio.
 
-Contains pure business logic with zero dependencies on infrastructure.
+from backend.domain.exceptions import (
+    DomainError,
+    DomainValidationError,
+    InvalidClipRangeError,
+    InvalidExportStateError,
+    InvalidPluginStateError,
+    InvalidProjectStateError,
+    InvalidQualityScoreError,
+    InvalidTimestampError,
+    InvalidVideoFormatError,
+    InvalidVideoStateError,
+)
+from backend.domain.value_objects import (
+    AspectRatio,
+    Duration,
+    FileHash,
+    FilePath,
+    FrameRate,
+    ProjectId,
+    QualityScore,
+    QualityScoreDimensions,
+    Resolution,
+    TimestampRange,
+    VideoId,
+    ClipId,
+    ExportId,
+    PluginId,
+    ProviderId,
+    CaptionId,
+    AnalysisId,
+    Language,
+    ExportFormat,
+)
+from backend.domain.events import (
+    AnalysisCompleted,
+    CaptionsGenerated,
+    ClipAccepted,
+    ClipGenerated,
+    ClipRejected,
+    DomainEvent,
+    ExportCompleted,
+    ExportFailed,
+    ExportStarted,
+    PluginLoaded,
+    PluginUnloaded,
+    ProjectCreated,
+    ProjectDeleted,
+    VideoAnalysed,
+    VideoImportFailed,
+    VideoImported,
+)
+from backend.domain.state_machines import (
+    AnalysisState,
+    ClipState,
+    ExportState,
+    PluginState,
+    ProjectState,
+    UploadState,
+    is_valid_analysis_transition,
+    is_valid_clip_transition,
+    is_valid_export_transition,
+    is_valid_plugin_transition,
+    is_valid_project_transition,
+    is_valid_upload_transition,
+    valid_analysis_transitions,
+    valid_clip_transitions,
+    valid_export_transitions,
+    valid_plugin_transitions,
+    valid_project_transitions,
+    valid_upload_transitions,
+)
+from backend.domain.entities import (
+    Analysis,
+    Caption,
+    Clip,
+    Export,
+    Plugin,
+    PluginInfo,
+    Project,
+    Provider,
+)
+from backend.domain.aggregates import ProjectAggregate
 
-Sub-modules:
-- entities/     — Core domain entities (Project, Video, Clip, Analysis, Transcript)
-- value_objects/ — Immutable value objects (TimeRange, QualityScore, BoundingBox)
-- aggregates/   — Aggregate roots (ProjectAggregate, PipelineAggregate)
-- events/       — Domain events (VideoImported, AnalysisCompleted, ExportCompleted)
-
-Rules:
-- Domain must have ZERO imports from infrastructure, API, or services layers
-- All entities are implemented as plain Python dataclasses
-- All value objects are frozen (immutable)
-- Aggregates enforce business invariants
-"""
+__all__ = [
+    # Exceptions
+    "DomainError",
+    "DomainValidationError",
+    "InvalidClipRangeError",
+    "InvalidExportStateError",
+    "InvalidPluginStateError",
+    "InvalidProjectStateError",
+    "InvalidQualityScoreError",
+    "InvalidTimestampError",
+    "InvalidVideoFormatError",
+    "InvalidVideoStateError",
+    # Value Objects
+    "AspectRatio",
+    "Duration",
+    "FileHash",
+    "FilePath",
+    "FrameRate",
+    "ProjectId",
+    "QualityScore",
+    "QualityScoreDimensions",
+    "Resolution",
+    "TimestampRange",
+    "VideoId",
+    "ClipId",
+    "ExportId",
+    "PluginId",
+    "ProviderId",
+    "CaptionId",
+    "AnalysisId",
+    "Language",
+    "ExportFormat",
+    # Events
+    "DomainEvent",
+    "ProjectCreated",
+    "ProjectDeleted",
+    "VideoImported",
+    "VideoImportFailed",
+    "VideoAnalysed",
+    "AnalysisCompleted",
+    "ClipGenerated",
+    "ClipAccepted",
+    "ClipRejected",
+    "CaptionsGenerated",
+    "ExportStarted",
+    "ExportCompleted",
+    "ExportFailed",
+    "PluginLoaded",
+    "PluginUnloaded",
+    # State Machines
+    "ProjectState",
+    "UploadState",
+    "AnalysisState",
+    "ClipState",
+    "ExportState",
+    "PluginState",
+    "is_valid_project_transition",
+    "is_valid_upload_transition",
+    "is_valid_analysis_transition",
+    "is_valid_clip_transition",
+    "is_valid_export_transition",
+    "is_valid_plugin_transition",
+    "valid_project_transitions",
+    "valid_upload_transitions",
+    "valid_analysis_transitions",
+    "valid_clip_transitions",
+    "valid_export_transitions",
+    "valid_plugin_transitions",
+    # Entities
+    "Project",
+    "Video",
+    "Analysis",
+    "Clip",
+    "Caption",
+    "Export",
+    "Provider",
+    "Plugin",
+    "PluginInfo",
+    # Aggregates
+    "ProjectAggregate",
+]
