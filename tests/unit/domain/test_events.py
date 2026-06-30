@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from backend.domain.events import (
     AnalysisCompleted,
     CaptionsGenerated,
@@ -17,8 +19,8 @@ from backend.domain.events import (
     ProjectCreated,
     ProjectDeleted,
     VideoAnalysed,
-    VideoImportFailed,
     VideoImported,
+    VideoImportFailed,
 )
 
 

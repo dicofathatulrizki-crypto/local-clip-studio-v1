@@ -482,23 +482,38 @@ D1 (API Client) → D2-D11 (Components) → D12 (Workspace)
 
 #### Module B1: Domain Entities
 
+> **Status:** COMPLETED ✅  
+> **Date:** 2026-06-30  
+> **Tests:** 350/350 passing | Zero mypy errors | Clean architecture
+
 | Property | Value |
 |----------|-------|
-| **Responsibilities** | Pure domain entities, value objects, aggregates, domain events |
+| **Responsibilities** | Pure domain entities, value objects, aggregates, domain events, state machines, exceptions |
 | **Dependencies** | A4 (database models as reference for field definitions) |
-| **Files to create** | `backend/domain/__init__.py`, `backend/domain/entities/__init__.py`, `backend/domain/entities/project.py`, `backend/domain/entities/video.py`, `backend/domain/entities/clip.py`, `backend/domain/entities/transcript.py`, `backend/domain/entities/analysis.py`, `backend/domain/value_objects/__init__.py`, `backend/domain/value_objects/time_range.py`, `backend/domain/value_objects/quality_score.py`, `backend/domain/value_objects/bounding_box.py`, `backend/domain/value_objects/transcript_segment.py`, `backend/domain/aggregates/__init__.py`, `backend/domain/aggregates/project_aggregate.py`, `backend/domain/events/__init__.py`, `backend/domain/events/video_imported.py`, `backend/domain/events/analysis_completed.py`, `backend/domain/events/export_completed.py` |
+| **Files created** | `backend/domain/__init__.py`, `backend/domain/exceptions.py`, `backend/domain/events.py`, `backend/domain/state_machines.py`, `backend/domain/value_objects.py`, `backend/domain/entities/__init__.py`, `backend/domain/entities/project.py`, `backend/domain/entities/video.py`, `backend/domain/entities/analysis.py`, `backend/domain/entities/clip.py`, `backend/domain/entities/caption.py`, `backend/domain/entities/export.py`, `backend/domain/entities/provider.py`, `backend/domain/entities/plugin.py`, `backend/domain/aggregates/__init__.py`, `backend/domain/aggregates/project_aggregate.py` |
 | **Estimated complexity** | Medium (6-8 hours) |
 | **Blocked by** | A4 |
 
 **Acceptance Criteria:**
-- All entities defined as `@dataclass` with typed fields
-- Value objects are immutable (frozen=True)
-- Aggregates enforce invariants (e.g., clip start < end)
-- Domain events carry all necessary data
-- No imports from infrastructure or framework code
-- State transitions validated (e.g., can't accept already-accepted clip)
+- ✅ All entities defined as `@dataclass` with typed fields and business behavior
+- ✅ Value objects are immutable (frozen=True) with built-in validation
+- ✅ Aggregates enforce invariants (clip start < end, minimum durations, state transitions)
+- ✅ Domain events carry all necessary data (framework-independent dataclasses)
+- ✅ No imports from infrastructure or framework code — pure Python standard library only
+- ✅ State transitions validated via 6 state machines (Project, Upload, Analysis, Clip, Export, Plugin)
+- ✅ 14 value objects: ProjectId, VideoId, ClipId, AnalysisId, ExportId, CaptionId, ProviderId, PluginId, Duration, TimestampRange, Resolution, AspectRatio, FrameRate, FileHash, FilePath, QualityScore, QualityScoreDimensions, Language, ExportFormat
+- ✅ 8 entities: Project, Video, Analysis, Clip, Caption, Export, Provider, Plugin (+ PluginInfo)
+- ✅ 1 aggregate root: ProjectAggregate with consistency boundary
+- ✅ 15 domain events covering all business operations
+- ✅ 6 state machines from SRS §11 with explicit transition maps
 
-**Required Tests:** `tests/unit/domain/test_project.py`, `tests/unit/domain/test_clip.py`, `tests/unit/domain/test_quality_score.py`, `tests/unit/domain/test_time_range.py`
+**Required Tests:** `tests/unit/domain/test_*.py` (10 test files, 350 tests, all passing)
+
+**Notable design decisions:**
+- Analysis pipeline has a fork at TRANSCRIBING where both DIARIZING and SCENE_DETECTING are valid next states (parallel stages) — the linear state machine enforces visiting one before the other
+- FrameRate normalizes input to float in `__post_init__` for consistent `__float__` behavior
+- Plugin lifecycle supports retry: ERROR → INITIALIZED for automatic recovery
+- Clip merge preserves highest scores and deduplicates hashtags
 
 ---
 

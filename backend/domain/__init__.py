@@ -10,6 +10,35 @@ Architecture Rules:
     - All business rules centralized here — never in services or API
 """
 
+from backend.domain.aggregates import ProjectAggregate
+from backend.domain.entities import (
+    Analysis,
+    Caption,
+    Clip,
+    Export,
+    Plugin,
+    PluginInfo,
+    Project,
+    Provider,
+)
+from backend.domain.events import (
+    AnalysisCompleted,
+    CaptionsGenerated,
+    ClipAccepted,
+    ClipGenerated,
+    ClipRejected,
+    DomainEvent,
+    ExportCompleted,
+    ExportFailed,
+    ExportStarted,
+    PluginLoaded,
+    PluginUnloaded,
+    ProjectCreated,
+    ProjectDeleted,
+    VideoAnalysed,
+    VideoImported,
+    VideoImportFailed,
+)
 from backend.domain.exceptions import (
     DomainError,
     DomainValidationError,
@@ -22,6 +51,26 @@ from backend.domain.exceptions import (
     InvalidTimestampError,
     InvalidVideoFormatError,
     InvalidVideoStateError,
+)
+from backend.domain.state_machines import (
+    AnalysisState,
+    ClipState,
+    ExportState,
+    PluginState,
+    ProjectState,
+    UploadState,
+    is_valid_analysis_transition,
+    is_valid_clip_transition,
+    is_valid_export_transition,
+    is_valid_plugin_transition,
+    is_valid_project_transition,
+    is_valid_upload_transition,
+    valid_analysis_transitions,
+    valid_clip_transitions,
+    valid_export_transitions,
+    valid_plugin_transitions,
+    valid_project_transitions,
+    valid_upload_transitions,
 )
 from backend.domain.value_objects import (
     AnalysisId,
@@ -44,55 +93,6 @@ from backend.domain.value_objects import (
     TimestampRange,
     VideoId,
 )
-from backend.domain.events import (
-    AnalysisCompleted,
-    CaptionsGenerated,
-    ClipAccepted,
-    ClipGenerated,
-    ClipRejected,
-    DomainEvent,
-    ExportCompleted,
-    ExportFailed,
-    ExportStarted,
-    PluginLoaded,
-    PluginUnloaded,
-    ProjectCreated,
-    ProjectDeleted,
-    VideoAnalysed,
-    VideoImportFailed,
-    VideoImported,
-)
-from backend.domain.state_machines import (
-    AnalysisState,
-    ClipState,
-    ExportState,
-    PluginState,
-    ProjectState,
-    UploadState,
-    is_valid_analysis_transition,
-    is_valid_clip_transition,
-    is_valid_export_transition,
-    is_valid_plugin_transition,
-    is_valid_project_transition,
-    is_valid_upload_transition,
-    valid_analysis_transitions,
-    valid_clip_transitions,
-    valid_export_transitions,
-    valid_plugin_transitions,
-    valid_project_transitions,
-    valid_upload_transitions,
-)
-from backend.domain.entities import (
-    Analysis,
-    Caption,
-    Clip,
-    Export,
-    Plugin,
-    PluginInfo,
-    Project,
-    Provider,
-)
-from backend.domain.aggregates import ProjectAggregate
 
 __all__ = [
     # Exceptions

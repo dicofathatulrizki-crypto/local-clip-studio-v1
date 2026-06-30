@@ -5,9 +5,13 @@ from __future__ import annotations
 import pytest
 
 from backend.domain.entities import Clip
-from backend.domain.exceptions import DomainValidationError, InvalidClipRangeError, InvalidQualityScoreError
+from backend.domain.exceptions import (
+    DomainValidationError,
+    InvalidClipRangeError,
+    InvalidQualityScoreError,
+)
 from backend.domain.state_machines import ClipState
-from backend.domain.value_objects import ClipId, VideoId
+from backend.domain.value_objects import VideoId
 
 
 class TestClipCreation:
@@ -205,8 +209,8 @@ class TestClipOverlap:
 
     def test_no_overlap_same_video(self) -> None:
         vid = VideoId("same")
-        a = Clip(video_id=vid, start_ms=1000, end_ms=3000)
-        b = Clip(video_id=vid, start_ms=4000, end_ms=6000)
+        a = Clip(video_id=vid, start_ms=1000, end_ms=5000)
+        b = Clip(video_id=vid, start_ms=6000, end_ms=10000)
         assert not a.overlaps_with(b)
 
     def test_no_overlap_different_video(self) -> None:
@@ -225,8 +229,8 @@ class TestClipOverlap:
 
     def test_merge_overlapping_raises(self) -> None:
         vid = VideoId("same")
-        a = Clip(video_id=vid, start_ms=1000, end_ms=2000)
-        b = Clip(video_id=vid, start_ms=3000, end_ms=4000)
+        a = Clip(video_id=vid, start_ms=1000, end_ms=5000)
+        b = Clip(video_id=vid, start_ms=6000, end_ms=10000)
         with pytest.raises(DomainValidationError):
             a.merge_with(b)
 

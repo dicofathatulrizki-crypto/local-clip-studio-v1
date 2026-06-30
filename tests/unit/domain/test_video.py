@@ -7,7 +7,7 @@ import pytest
 from backend.domain.entities import Video
 from backend.domain.exceptions import DomainValidationError, InvalidVideoFormatError
 from backend.domain.state_machines import UploadState
-from backend.domain.value_objects import Duration, Resolution, VideoId
+from backend.domain.value_objects import Duration, Resolution
 
 
 class TestVideoCreation:

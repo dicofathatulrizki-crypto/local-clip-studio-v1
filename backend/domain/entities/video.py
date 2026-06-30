@@ -75,7 +75,7 @@ class Video:
             )
         if self.file_size_bytes > MAX_IMPORT_SIZE_BYTES:
             raise InvalidVideoFormatError(
-                f"File exceeds maximum import size of 50 GB",
+                "File exceeds maximum import size of 50 GB",
                 {
                     "file_size_bytes": self.file_size_bytes,
                     "max_size_bytes": MAX_IMPORT_SIZE_BYTES,

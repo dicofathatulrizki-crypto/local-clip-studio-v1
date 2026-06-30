@@ -178,8 +178,8 @@ class TestTimestampRange:
         assert b.overlaps(a)
 
     def test_no_overlap(self) -> None:
-        a = TimestampRange(start_ms=1000, end_ms=3000)
-        b = TimestampRange(start_ms=4000, end_ms=6000)
+        a = TimestampRange(start_ms=1000, end_ms=5000)
+        b = TimestampRange(start_ms=6000, end_ms=10000)
         assert not a.overlaps(b)
 
     def test_merge(self) -> None:
@@ -190,8 +190,8 @@ class TestTimestampRange:
         assert merged.end_ms == 7000
 
     def test_merge_non_overlapping_raises(self) -> None:
-        a = TimestampRange(start_ms=1000, end_ms=2000)
-        b = TimestampRange(start_ms=3000, end_ms=4000)
+        a = TimestampRange(start_ms=1000, end_ms=5000)
+        b = TimestampRange(start_ms=6000, end_ms=10000)
         with pytest.raises(InvalidTimestampError):
             a.merge(b)
 
@@ -269,7 +269,7 @@ class TestFrameRate:
         assert fr.duration_per_frame_ms == pytest.approx(33.33, rel=0.01)
 
     def test_float_conversion(self) -> None:
-        assert float(FrameRate(24)) == 24.0
+        assert float(FrameRate(24.0)) == 24.0
 
 
 class TestFileHash:

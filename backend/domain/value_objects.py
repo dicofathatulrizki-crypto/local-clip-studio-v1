@@ -19,7 +19,6 @@ import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from backend.domain.exceptions import (
     DomainValidationError,
@@ -385,6 +384,8 @@ class FrameRate:
     fps: float = 0.0
 
     def __post_init__(self) -> None:
+        # Normalize to float
+        object.__setattr__(self, "fps", float(self.fps))
         if self.fps <= 0:
             raise DomainValidationError(
                 "Frame rate must be positive",

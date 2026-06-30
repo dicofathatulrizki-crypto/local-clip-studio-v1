@@ -44,9 +44,7 @@ class TestAnalysisStateTransitions:
         analysis.start_transcribing()
         assert analysis.status == AnalysisState.TRANSCRIBING
 
-        analysis.start_diarizing()
-        assert analysis.status == AnalysisState.DIARIZING
-
+        # Scene detection can start directly after transcribing (parallel path)
         analysis.start_scene_detection()
         assert analysis.status == AnalysisState.SCENE_DETECTING
 
@@ -75,7 +73,12 @@ class TestAnalysisStateTransitions:
 
     def test_invalid_transition_from_completed(self) -> None:
         analysis = Analysis()
+        # Full pipeline to COMPLETED
         analysis.start_preprocessing()
+        analysis.start_transcribing()
+        analysis.start_scene_detection()
+        analysis.start_analyzing()
+        analysis.start_scoring()
         analysis.complete()
         with pytest.raises(Exception):
             analysis.start_preprocessing()
@@ -146,6 +149,10 @@ class TestAnalysisQueries:
     def test_is_completed(self) -> None:
         analysis = Analysis()
         analysis.start_preprocessing()
+        analysis.start_transcribing()
+        analysis.start_scene_detection()
+        analysis.start_analyzing()
+        analysis.start_scoring()
         analysis.complete()
         assert analysis.is_completed
 
@@ -153,6 +160,10 @@ class TestAnalysisQueries:
         analysis = Analysis()
         analysis.start_preprocessing()
         assert analysis.is_in_progress
+        analysis.start_transcribing()
+        analysis.start_scene_detection()
+        analysis.start_analyzing()
+        analysis.start_scoring()
         analysis.complete()
         assert not analysis.is_in_progress
 

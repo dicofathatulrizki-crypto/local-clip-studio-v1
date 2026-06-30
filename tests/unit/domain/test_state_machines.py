@@ -24,8 +24,6 @@ from backend.domain.state_machines import (
     is_valid_project_transition,
     is_valid_upload_transition,
     valid_analysis_transitions,
-    valid_clip_transitions,
-    valid_export_transitions,
     valid_plugin_transitions,
     valid_project_transitions,
     valid_upload_transitions,

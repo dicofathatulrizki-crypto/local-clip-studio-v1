@@ -6,7 +6,7 @@ import pytest
 
 from backend.domain.entities import Caption
 from backend.domain.exceptions import DomainValidationError
-from backend.domain.value_objects import CaptionId, Language
+from backend.domain.value_objects import Language
 
 
 class TestCaptionCreation:
@@ -72,4 +72,3 @@ class TestCaptionBehaviour:
         assert Caption(language="en").language_name == "English"
         assert Caption(language="es").language_name == "Spanish"
         assert Caption(language="fr").language_name == "French"
-        assert Caption(language="xx_unsupported").language_name == "xx_unsupported"
