@@ -71,7 +71,7 @@ class ShortcutSettings(BaseModel):
 
 
 class APISettings(BaseModel):
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8765
     reload: bool = True
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:4173"]

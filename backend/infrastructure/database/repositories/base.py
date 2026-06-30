@@ -70,15 +70,6 @@ class BaseRepository(Generic[ModelT]):
         """Check if the model has a 'version' field for optimistic locking."""
         return hasattr(self.model_class, "version")
 
-    def _execute_and_handle(
-        self, coro: Any, error_context: dict[str, Any] | None = None
-    ) -> Any:
-        """Execute a coroutine and translate SQLAlchemy errors.
-
-        This is a helper for the error handling pattern.
-        """
-        return coro
-
     # ------------------------------------------------------------------
     # Error Handling
     # ------------------------------------------------------------------

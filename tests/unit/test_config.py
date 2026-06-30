@@ -59,7 +59,7 @@ class TestSettingsDefaults:
 
     def test_api_defaults(self, test_settings: Settings) -> None:
         """API settings should have correct defaults."""
-        assert test_settings.api.host == "0.0.0.0"
+        assert test_settings.api.host == "127.0.0.1"
         assert test_settings.api.port == 8765
         assert test_settings.api.reload is True
         assert "http://localhost:5173" in test_settings.api.cors_origins

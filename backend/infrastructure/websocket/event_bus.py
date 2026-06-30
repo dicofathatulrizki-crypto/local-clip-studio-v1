@@ -31,12 +31,6 @@ from backend.infrastructure.websocket.serializer import Serializer
 
 logger = get_logger(__name__)
 
-# Type for async event listeners
-EventListener = Callable[
-    [WebSocketEvent],
-    Coroutine[Any, Any, None],
-]
-
 
 class EventBus:
     """Event bus for publishing WebSocket events.
