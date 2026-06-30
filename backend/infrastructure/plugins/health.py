@@ -50,31 +50,26 @@ class PluginHealthChecker:
             return result
 
         start = time.monotonic()
+        health_result: dict[str, Any] = {}
         try:
             # Call health_check if it exists and is async
             if hasattr(plugin, "health_check"):
-                health_result = plugin.health_check()
-                if hasattr(health_result, "__await__"):
-                    health_result = await health_result
+                check_result = plugin.health_check()
+                if hasattr(check_result, "__await__"):
+                    check_result = await check_result
 
-                result: dict[str, Any] = {
-                    "status": health_result.get("status", "ok") if isinstance(health_result, dict) else "ok",
-                    "latency_ms": int((time.monotonic() - start) * 1000),
-                }
-                if isinstance(health_result, dict):
-                    result.update(health_result)
-            else:
-                result = {
-                    "status": "ok",
-                    "latency_ms": int((time.monotonic() - start) * 1000),
-                    "note": "no health_check method",
-                }
+                if isinstance(check_result, dict):
+                    health_result = dict(check_result)
 
-            instance.health_status = str(result.get("status", "unknown"))
+            health_result.setdefault("status", "ok")
+            if "latency_ms" not in health_result:
+                health_result["latency_ms"] = int((time.monotonic() - start) * 1000)
+
+            instance.health_status = str(health_result.get("status", "unknown"))
             instance.last_health_check = time.time()
 
         except Exception as exc:
-            result = {
+            health_result = {
                 "status": "error",
                 "message": str(exc),
                 "latency_ms": int((time.monotonic() - start) * 1000),

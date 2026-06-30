@@ -92,7 +92,7 @@ class PluginLoader:
             )
             return instance
 
-        except (ImportError, ModuleNotFoundError, AttributeError, TypeError) as exc:
+        except (ImportError, ModuleNotFoundError, AttributeError, TypeError, ValueError) as exc:
             error = PluginLoadError(str(exc), manifest.id)
             logger.error(
                 "Plugin load failed",
