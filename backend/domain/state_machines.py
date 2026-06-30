@@ -14,7 +14,12 @@ from __future__ import annotations
 
 from enum import Enum
 
-from backend.domain.exceptions import InvalidStateTransitionError
+from backend.domain.exceptions import (
+    InvalidExportStateError,
+    InvalidPluginStateError,
+    InvalidProjectStateError,
+    InvalidVideoStateError,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +156,7 @@ ANALYSIS_TRANSITIONS: dict[AnalysisState, set[AnalysisState]] = {
     },
     AnalysisState.TRANSCRIBING: {
         AnalysisState.DIARIZING,
-        AnalysisState.SCENE_DETECTING,  # Can run in parallel
+        AnalysisState.SCENE_DETECTING,
         AnalysisState.FAILED,
         AnalysisState.CANCELLED,
     },
@@ -237,8 +242,10 @@ def valid_clip_transitions(state: ClipState) -> list[ClipState]:
 
 
 def validate_clip_transition(current: ClipState, target: ClipState) -> None:
-    """Raise ``InvalidVideoStateError`` if the transition is not allowed."""
+    """Raise ``InvalidClipRangeError`` if the transition is not allowed."""
     if not is_valid_clip_transition(current, target):
+        from backend.domain.exceptions import InvalidClipRangeError
+
         raise InvalidClipRangeError(
             f"Cannot transition clip from '{current.value}' to '{target.value}'",
         )
@@ -304,9 +311,6 @@ class PluginState(str, Enum):
          │               │            │                │
          └──→ ``ERROR``  └──→ ``ERROR``                │
                                     └──→ ``ERROR`` ──→ ``SHUTDOWN`` → ``DISABLED``
-
-    Periodic health checks run while ACTIVE; unhealthy plugins transition
-    to ERROR (and from ERROR to SHUTDOWN → DISABLED).
     """
 
     DISCOVERED = "discovered"
@@ -323,7 +327,7 @@ PLUGIN_TRANSITIONS: dict[PluginState, set[PluginState]] = {
     PluginState.LOADED: {PluginState.INITIALIZED, PluginState.ERROR, PluginState.DISABLED},
     PluginState.INITIALIZED: {PluginState.ACTIVE, PluginState.ERROR},
     PluginState.ACTIVE: {PluginState.SHUTDOWN, PluginState.ERROR},
-    PluginState.SHUTDOWN: {PluginState.DISABLED, PluginState.ACTIVE},
+    PluginState.SHUTDOWN: {PluginState.DISABLED, PluginState.ACTIVE},  # Reactivate
     PluginState.ERROR: {PluginState.SHUTDOWN, PluginState.INITIALIZED},  # Retry
     PluginState.DISABLED: set(),  # Terminal
 }

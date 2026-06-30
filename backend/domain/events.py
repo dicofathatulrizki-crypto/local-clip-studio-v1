@@ -12,6 +12,7 @@ Architecture:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -39,8 +40,6 @@ class DomainEvent:
     @staticmethod
     def _generate_id() -> str:
         """Generate a simple unique event ID (no UUID dependency needed)."""
-        import time
-
         return f"evt-{int(time.time() * 1_000_000)}-{id(object())}"
 
 

@@ -1,9 +1,5 @@
 """Caption entity — a timed caption track for a clip.
 
-A Caption represents a single caption track (e.g., source language or
-translated) associated with a clip. It contains word-level timed
-caption data and styling information.
-
 Business rules:
     - Each clip can have multiple caption tracks (one per language)
     - Source language track is marked as ``is_source_language=True``
@@ -16,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from backend.domain.exceptions import DomainValidationError
 from backend.domain.value_objects import CaptionId, ClipId, Language
 
 
@@ -27,7 +24,7 @@ class Caption:
         id: Unique caption track identifier.
         clip_id: Identifier of the associated clip.
         language: Language code (ISO 639-1, e.g., 'en', 'es').
-        style: Caption styling configuration (font, size, color, position, etc.).
+        style: Caption styling configuration (font, size, color, position).
         captions: List of caption segments with timing and text.
         is_source_language: Whether this is the original source language track.
         created_at: Timestamp of creation.
@@ -46,11 +43,7 @@ class Caption:
 
     def _validate(self) -> None:
         """Validate caption invariants."""
-        from backend.domain.exceptions import DomainValidationError
-
         if not Language.is_supported(self.language):
-            from backend.domain.exceptions import DomainValidationError
-
             raise DomainValidationError(
                 f"Unsupported language code: '{self.language}'",
                 {"language": self.language, "supported": list(Language)},

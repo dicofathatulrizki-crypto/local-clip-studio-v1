@@ -1,14 +1,9 @@
 """Video entity — represents an imported video file.
 
-A ``Video`` is the deduplicated media record shared across projects.
-It contains immutable metadata about the source file and tracks its
-import lifecycle state.
-
 Business rules:
     - Supported formats: MP4, MOV, MKV, AVI, WebM (PRD-IMP-001)
     - File size must not exceed 50 GB (PRD-IMP-003)
     - Each video is uniquely identified by its SHA-256 hash (PRD-IMP-011)
-    - Duplicate detection prevents re-importing the same file (PRD-IMP-005)
 """
 
 from __future__ import annotations
@@ -16,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from backend.domain.exceptions import DomainValidationError, InvalidVideoFormatError
 from backend.domain.state_machines import UploadState, validate_upload_transition
 from backend.domain.value_objects import (
     Duration,
@@ -25,6 +21,8 @@ from backend.domain.value_objects import (
     Resolution,
     VideoId,
 )
+
+MAX_IMPORT_SIZE_BYTES: int = 50 * 1024 * 1024 * 1024  # 50 GB
 
 
 @dataclass
@@ -68,8 +66,6 @@ class Video:
 
     def _validate(self) -> None:
         """Validate video invariants."""
-        from backend.domain.exceptions import DomainValidationError
-
         if not self.original_filename:
             raise DomainValidationError("Original filename cannot be empty")
         if self.file_size_bytes < 0:
@@ -77,15 +73,12 @@ class Video:
                 "File size cannot be negative",
                 {"file_size_bytes": self.file_size_bytes},
             )
-        MAX_SIZE = 50 * 1024 * 1024 * 1024  # 50 GB
-        if self.file_size_bytes > MAX_SIZE:
-            from backend.domain.exceptions import InvalidVideoFormatError
-
+        if self.file_size_bytes > MAX_IMPORT_SIZE_BYTES:
             raise InvalidVideoFormatError(
                 f"File exceeds maximum import size of 50 GB",
                 {
                     "file_size_bytes": self.file_size_bytes,
-                    "max_size_bytes": MAX_SIZE,
+                    "max_size_bytes": MAX_IMPORT_SIZE_BYTES,
                 },
             )
         if self.duration_ms < 0:
@@ -159,11 +152,6 @@ class Video:
         return FilePath(path=self.storage_path)
 
     @property
-    def file_hash(self) -> FileHash:
-        """Get the file hash (returns self.hash)."""
-        return self.hash
-
-    @property
     def is_ready(self) -> bool:
         """Check if the video is ready for processing."""
         return self.upload_state == UploadState.READY
@@ -174,10 +162,4 @@ class Video:
         ext = ""
         if "." in self.original_filename:
             ext = self.original_filename.rsplit(".", 1)[-1].lower()
-        return f".{ext}" in {
-            ".mp4",
-            ".mov",
-            ".mkv",
-            ".avi",
-            ".webm",
-        }
+        return f".{ext}" in {".mp4", ".mov", ".mkv", ".avi", ".webm"}

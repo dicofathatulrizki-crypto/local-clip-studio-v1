@@ -1,197 +1,199 @@
-"""Plugin entity — represents an installed AI plugin.
+"""Plugin entity — represents a plugin in the system.
 
-Each plugin implements one of the provider interfaces (STT, LLM, Vision,
-Caption, Translation, Export). Plugins follow a lifecycle:
-DISCOVERED → LOADED → INITIALIZED → ACTIVE → ERROR → SHUTDOWN → DISABLED.
+A Plugin represents a loaded plugin instance with its runtime state.
+``PluginInfo`` is the immutable metadata about a plugin (from its manifest).
+
+Business rules:
+    - Plugin lifecycle follows ``PluginState`` machine (SRS §11.6)
+    - Each plugin has a unique name (identifier)
+    - Version must follow semantic versioning
+    - Permissions are declared in manifest and enforced at runtime
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
-from backend.domain.exceptions import (
-    CyclicDependencyError,
-    DuplicatePluginError,
-    InvalidTransitionError,
-    PluginError,
-)
-from backend.domain.value_objects import PluginState
+from backend.domain.exceptions import DomainValidationError
+from backend.domain.state_machines import PluginState, validate_plugin_transition
+from backend.domain.value_objects import PluginId
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+@dataclass(frozen=True)
+class PluginInfo:
+    """Immutable plugin metadata from the manifest.
+
+    This is the read-only description of a plugin. It is created from
+    the plugin's ``manifest.json`` and does not change during the
+    application's runtime.
+    """
+
+    name: str = ""
+    version: str = ""
+    plugin_type: str = ""  # stt, llm, vision, caption, translation, export
+    author: str = ""
+    description: str = ""
+    entry_point: str = ""
+    capabilities: list[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
+    min_app_version: str = ""
+    max_app_version: str | None = None
+    models: list[dict[str, Any]] = field(default_factory=list)
+    python_dependencies: list[str] = field(default_factory=list)
+    checksum: str | None = None
+
+    def __post_init__(self) -> None:
+        self._validate()
+
+    def _validate(self) -> None:
+        """Validate plugin info invariants."""
+        if not self.name:
+            raise DomainValidationError("Plugin name cannot be empty")
+        if not self.version:
+            raise DomainValidationError("Plugin version cannot be empty")
+        VALID_TYPES = {"stt", "llm", "vision", "caption", "translation", "export"}
+        if self.plugin_type and self.plugin_type not in VALID_TYPES:
+            raise DomainValidationError(
+                f"Invalid plugin type: '{self.plugin_type}'",
+                {"plugin_type": self.plugin_type, "valid": list(VALID_TYPES)},
+            )
+
+    @property
+    def plugin_id(self) -> PluginId:
+        return PluginId(value=self.name)
 
 
 @dataclass
 class Plugin:
-    """An installed AI plugin.
+    """A plugin instance with its runtime state.
 
-    Business rules:
-    - Plugin ID must be unique across all installed plugins
-    - Entry point must be in format 'module:ClassName'
-    - State transitions follow SRS §11.6 plugin lifecycle
-    - Dependencies must form an acyclic graph (no circular deps)
-    - Version must follow semantic versioning
+    Attributes:
+        info: Immutable plugin metadata from the manifest.
+        state: Current lifecycle state.
+        instance: Runtime plugin instance (set after loading).
+        error_message: Error message if in ERROR state.
+        priority: Priority for fallback ordering (0 = highest).
+        health_status: Last health check result.
+        loaded_at: Timestamp when the plugin was loaded.
     """
 
-    # ─── Identity ──────────────────────────────────────────
-    id: str = ""
-    name: str = ""
-    version: str = "0.0.0"
-
-    # ─── Type & Entry Point ────────────────────────────────
-    plugin_type: str = "unknown"  # stt, llm, vision, caption, translation, export
-    entry_point: str = ""
-
-    # ─── Metadata ──────────────────────────────────────────
-    author: str = ""
-    description: str = ""
-    capabilities: list[str] = field(default_factory=list)
-
-    # ─── Lifecycle ─────────────────────────────────────────
+    info: PluginInfo = field(default_factory=PluginInfo)
     state: PluginState = PluginState.DISCOVERED
-    priority: int = 100
-    enabled: bool = True
-
-    # ─── Dependencies ──────────────────────────────────────
-    dependencies: list[str] = field(default_factory=list)
-    optional_dependencies: list[str] = field(default_factory=list)
-
-    # ─── Permissions ───────────────────────────────────────
-    permissions: list[str] = field(default_factory=list)
-
-    # ─── Runtime ───────────────────────────────────────────
+    instance: Any = None  # Set after loading — contains the plugin class instance
+    error_message: str | None = None
+    priority: int = 50  # Default priority (0 = highest, 100 = lowest)
     health_status: str = "unknown"
-    error_message: str = ""
-    loaded_at: float = 0.0
-    last_health_check: float = 0.0
-
-    # ─── Timestamps ────────────────────────────────────────
-    created_at: datetime = field(default_factory=_utcnow)
-
-    SUPPORTED_TYPES: set[str] = {
-        "stt", "llm", "vision", "caption", "translation", "export",
-    }
+    loaded_at: datetime | None = None
 
     def __post_init__(self) -> None:
-        if not self.id or not self.id.strip():
-            raise PluginError("Plugin ID cannot be empty")
-        if self.entry_point and ":" not in self.entry_point:
-            raise PluginError(
-                f"Entry point must be in 'module:ClassName' format, "
-                f"got '{self.entry_point}'"
-            )
-        if self.plugin_type not in self.SUPPORTED_TYPES:
-            raise PluginError(
-                f"Unsupported plugin type '{self.plugin_type}'. "
-                f"Supported: {', '.join(sorted(self.SUPPORTED_TYPES))}"
-            )
+        self._validate()
 
-    # ─── Lifecycle Transitions ─────────────────────────────
+    def _validate(self) -> None:
+        """Validate plugin invariants."""
+        if not self.info.name:
+            raise DomainValidationError("Plugin must have a name")
 
-    def _transition_to(self, target: PluginState) -> None:
-        if not self.state.can_transition_to(target):
-            raise InvalidTransitionError(
-                f"Cannot transition plugin from "
-                f"'{self.state.value}' to '{target.value}'"
-            )
-        self.state = target
+    # ------------------------------------------------------------------
+    # State transitions
+    # ------------------------------------------------------------------
 
     def load(self) -> None:
-        """Transition from DISCOVERED to LOADED."""
-        self._transition_to(PluginState.LOADED)
+        """Transition to LOADED state."""
+        validate_plugin_transition(self.state, PluginState.LOADED)
+        self.state = PluginState.LOADED
+        self.loaded_at = datetime.now()
 
     def initialize(self) -> None:
-        """Transition from LOADED to INITIALIZED."""
-        self._transition_to(PluginState.INITIALIZED)
+        """Transition to INITIALIZED state."""
+        validate_plugin_transition(self.state, PluginState.INITIALIZED)
+        self.state = PluginState.INITIALIZED
 
     def activate(self) -> None:
-        """Transition from INITIALIZED to ACTIVE."""
-        self._transition_to(PluginState.ACTIVE)
-
-    def mark_error(self, message: str = "") -> None:
-        """Transition to ERROR state with error message."""
-        self._transition_to(PluginState.ERROR)
-        self.error_message = message
-        self.health_status = "error"
+        """Transition to ACTIVE state."""
+        validate_plugin_transition(self.state, PluginState.ACTIVE)
+        self.state = PluginState.ACTIVE
 
     def shutdown(self) -> None:
         """Transition to SHUTDOWN state."""
-        self._transition_to(PluginState.SHUTDOWN)
-        self.health_status = "shutdown"
+        validate_plugin_transition(self.state, PluginState.SHUTDOWN)
+        self.state = PluginState.SHUTDOWN
 
     def disable(self) -> None:
-        """Disable the plugin (must be in SHUTDOWN state)."""
-        self._transition_to(PluginState.DISABLED)
-        self.enabled = False
+        """Transition to DISABLED state (terminal)."""
+        validate_plugin_transition(self.state, PluginState.DISABLED)
+        self.state = PluginState.DISABLED
 
-    # ─── Dependency Validation ─────────────────────────────
+    def mark_error(self, error_message: str) -> None:
+        """Transition to ERROR state with an error message."""
+        validate_plugin_transition(self.state, PluginState.ERROR)
+        self.state = PluginState.ERROR
+        self.error_message = error_message
 
-    def check_cyclic_dependency(
-        self,
-        all_plugins: dict[str, Plugin],
-        path: list[str] | None = None,
-    ) -> None:
-        """Check if this plugin creates a cyclic dependency.
+    def retry(self) -> None:
+        """Retry from ERROR by going back to INITIALIZED."""
+        validate_plugin_transition(self.state, PluginState.INITIALIZED)
+        self.state = PluginState.INITIALIZED
+        self.error_message = None
 
-        Args:
-            all_plugins: Dict of all plugin IDs to their Plugin objects.
-            path: Current dependency path (internal recursion).
+    # ------------------------------------------------------------------
+    # Behaviour
+    # ------------------------------------------------------------------
 
-        Raises:
-            CyclicDependencyError: If a cycle is detected.
-        """
-        if path is None:
-            path = []
-        if self.id in path:
-            cycle = path[path.index(self.id):] + [self.id]
-            raise CyclicDependencyError(cycle)
-        if self.id in path:
-            return
-        for dep_id in self.dependencies:
-            if dep_id in all_plugins:
-                dep = all_plugins[dep_id]
-                dep.check_cyclic_dependency(all_plugins, path + [self.id])
+    def set_instance(self, instance: Any) -> None:
+        """Set the runtime plugin instance after loading."""
+        self.instance = instance
 
-    def check_dependency_satisfied(
-        self,
-        all_plugins: dict[str, Plugin],
-    ) -> list[str]:
-        """Check that all required dependencies are available.
+    def set_priority(self, priority: int) -> None:
+        """Set the plugin's priority for fallback ordering.
 
         Args:
-            all_plugins: Dict of all plugin IDs to their Plugin objects.
-
-        Returns:
-            List of missing dependency IDs.
+            priority: Priority value (0 = highest, 100 = lowest).
         """
-        missing: list[str] = []
-        for dep_id in self.dependencies:
-            if dep_id not in all_plugins:
-                missing.append(dep_id)
-            else:
-                dep = all_plugins[dep_id]
-                if not dep.enabled or dep.state in (
-                    PluginState.ERROR, PluginState.SHUTDOWN, PluginState.DISABLED,
-                ):
-                    missing.append(dep_id)
-        return missing
+        if not (0 <= priority <= 100):
+            raise DomainValidationError(
+                "Priority must be between 0 and 100",
+                {"priority": priority},
+            )
+        self.priority = priority
 
-    # ─── Queries ───────────────────────────────────────────
+    def update_health(self, status: str) -> None:
+        """Update the health check result.
+
+        Args:
+            status: Health status string ('healthy', 'degraded', 'unhealthy').
+        """
+        self.health_status = status
+
+    # ------------------------------------------------------------------
+    # Queries
+    # ------------------------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        return self.info.name
+
+    @property
+    def plugin_type(self) -> str:
+        return self.info.plugin_type
+
+    @property
+    def version(self) -> str:
+        return self.info.version
 
     @property
     def is_active(self) -> bool:
-        return self.state == PluginState.ACTIVE and self.enabled
+        return self.state == PluginState.ACTIVE
 
     @property
-    def is_error(self) -> bool:
+    def is_loaded(self) -> bool:
+        return self.state in {PluginState.LOADED, PluginState.INITIALIZED, PluginState.ACTIVE}
+
+    @property
+    def has_error(self) -> bool:
         return self.state == PluginState.ERROR
 
     @property
-    def is_healthy(self) -> bool:
-        return self.health_status == "ok"
-
-    def has_capability(self, capability: str) -> bool:
-        return capability in self.capabilities
+    def is_disabled(self) -> bool:
+        return self.state == PluginState.DISABLED

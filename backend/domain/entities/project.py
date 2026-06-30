@@ -15,10 +15,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from backend.domain.state_machines import (
-    ProjectState,
-    validate_project_transition,
-)
+from backend.domain.exceptions import DomainValidationError
+from backend.domain.state_machines import ProjectState, validate_project_transition
 from backend.domain.value_objects import ProjectId
 
 
@@ -56,12 +54,8 @@ class Project:
     def _validate(self) -> None:
         """Validate project invariants."""
         if not self.name or not self.name.strip():
-            from backend.domain.exceptions import DomainValidationError
-
             raise DomainValidationError("Project name cannot be empty")
         if len(self.name) > 255:
-            from backend.domain.exceptions import DomainValidationError
-
             raise DomainValidationError(
                 "Project name must be 255 characters or fewer",
                 {"name_length": len(self.name)},
@@ -108,9 +102,6 @@ class Project:
 
         Args:
             new_name: New project name (1-255 characters).
-
-        Raises:
-            DomainValidationError: if the new name is invalid.
         """
         old_name = self.name
         self.name = new_name

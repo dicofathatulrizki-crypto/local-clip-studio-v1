@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
 import re
 import time
 from dataclasses import dataclass, field
@@ -24,7 +25,6 @@ from backend.domain.exceptions import (
     DomainValidationError,
     InvalidQualityScoreError,
     InvalidTimestampError,
-    InvalidVideoFormatError,
 )
 
 # ---------------------------------------------------------------------------
@@ -32,18 +32,20 @@ from backend.domain.exceptions import (
 # ---------------------------------------------------------------------------
 
 SUPPORTED_VIDEO_EXTENSIONS: set[str] = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
-SUPPORTED_VIDEO_CODECS: set[str] = {"h264", "h265", "hevc", "vp9", "prores", "av1"}
-SUPPORTED_AUDIO_CODECS: set[str] = {"aac", "mp3", "opus", "pcm_s16le", "flac", "vorbis"}
-SUPPORTED_EXPORT_FORMATS: set[str] = {"mp4", "mov", "webm", "srt", "vtt", "ass", "edl", "xml", "json"}
+SUPPORTED_EXPORT_FORMATS: set[str] = {
+    "mp4", "mov", "webm", "srt", "vtt", "ass", "edl", "xml", "json",
+}
 SUPPORTED_LANGUAGES: set[str] = {
     "en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh",
     "ar", "hi", "nl", "pl", "tr", "th", "vi", "sv", "da", "fi",
 }
-MAX_FILE_SIZE_BYTES: int = 50 * 1024 * 1024 * 1024  # 50 GB
-MIN_CLIP_DURATION_MS: int = 3_000  # 3 seconds
-MAX_CLIP_DURATION_MS: int = 90_000  # 90 seconds
 QUALITY_SCORE_MIN: int = 0
 QUALITY_SCORE_MAX: int = 100
+
+
+def _generate_id() -> str:
+    """Generate a simple unique ID string."""
+    return f"{int(time.time() * 1_000_000):020x}-{random.getrandbits(64):016x}"
 
 
 # ---------------------------------------------------------------------------
@@ -53,28 +55,15 @@ QUALITY_SCORE_MAX: int = 100
 
 @dataclass(frozen=True)
 class ProjectId:
-    """Identifies a unique project.
-
-    Wraps a UUID string. Validates non-empty format on construction.
-    """
+    """Identifies a unique project. Auto-generates if value is empty."""
 
     value: str = ""
 
     def __post_init__(self) -> None:
         if not self.value:
-            object.__setattr__(self, "value", self._generate())
+            object.__setattr__(self, "value", _generate_id())
         elif not self.value.strip():
             raise DomainValidationError("ProjectId cannot be empty")
-
-    @staticmethod
-    def _generate() -> str:
-        """Generate a simple unique ID (no uuid import needed)."""
-        import random
-
-        return (
-            f"{int(time.time() * 1_000_000):020x}-"
-            f"{random.getrandbits(64):016x}"
-        )
 
     def __str__(self) -> str:
         return self.value
@@ -82,24 +71,15 @@ class ProjectId:
 
 @dataclass(frozen=True)
 class VideoId:
-    """Identifies a unique video (shared across projects)."""
+    """Identifies a unique video. Auto-generates if value is empty."""
 
     value: str = ""
 
     def __post_init__(self) -> None:
         if not self.value:
-            object.__setattr__(self, "value", self._generate())
+            object.__setattr__(self, "value", _generate_id())
         elif not self.value.strip():
             raise DomainValidationError("VideoId cannot be empty")
-
-    @staticmethod
-    def _generate() -> str:
-        import random
-
-        return (
-            f"{int(time.time() * 1_000_000):020x}-"
-            f"{random.getrandbits(64):016x}"
-        )
 
     def __str__(self) -> str:
         return self.value
@@ -107,24 +87,15 @@ class VideoId:
 
 @dataclass(frozen=True)
 class ClipId:
-    """Identifies a unique clip candidate."""
+    """Identifies a unique clip candidate. Auto-generates if value is empty."""
 
     value: str = ""
 
     def __post_init__(self) -> None:
         if not self.value:
-            object.__setattr__(self, "value", self._generate())
+            object.__setattr__(self, "value", _generate_id())
         elif not self.value.strip():
             raise DomainValidationError("ClipId cannot be empty")
-
-    @staticmethod
-    def _generate() -> str:
-        import random
-
-        return (
-            f"{int(time.time() * 1_000_000):020x}-"
-            f"{random.getrandbits(64):016x}"
-        )
 
     def __str__(self) -> str:
         return self.value
@@ -132,24 +103,15 @@ class ClipId:
 
 @dataclass(frozen=True)
 class AnalysisId:
-    """Identifies a unique analysis record."""
+    """Identifies a unique analysis record. Auto-generates if value is empty."""
 
     value: str = ""
 
     def __post_init__(self) -> None:
         if not self.value:
-            object.__setattr__(self, "value", self._generate())
+            object.__setattr__(self, "value", _generate_id())
         elif not self.value.strip():
             raise DomainValidationError("AnalysisId cannot be empty")
-
-    @staticmethod
-    def _generate() -> str:
-        import random
-
-        return (
-            f"{int(time.time() * 1_000_000):020x}-"
-            f"{random.getrandbits(64):016x}"
-        )
 
     def __str__(self) -> str:
         return self.value
@@ -157,24 +119,15 @@ class AnalysisId:
 
 @dataclass(frozen=True)
 class ExportId:
-    """Identifies a unique export job."""
+    """Identifies a unique export job. Auto-generates if value is empty."""
 
     value: str = ""
 
     def __post_init__(self) -> None:
         if not self.value:
-            object.__setattr__(self, "value", self._generate())
+            object.__setattr__(self, "value", _generate_id())
         elif not self.value.strip():
             raise DomainValidationError("ExportId cannot be empty")
-
-    @staticmethod
-    def _generate() -> str:
-        import random
-
-        return (
-            f"{int(time.time() * 1_000_000):020x}-"
-            f"{random.getrandbits(64):016x}"
-        )
 
     def __str__(self) -> str:
         return self.value
@@ -182,24 +135,15 @@ class ExportId:
 
 @dataclass(frozen=True)
 class CaptionId:
-    """Identifies a unique caption track."""
+    """Identifies a unique caption track. Auto-generates if value is empty."""
 
     value: str = ""
 
     def __post_init__(self) -> None:
         if not self.value:
-            object.__setattr__(self, "value", self._generate())
+            object.__setattr__(self, "value", _generate_id())
         elif not self.value.strip():
             raise DomainValidationError("CaptionId cannot be empty")
-
-    @staticmethod
-    def _generate() -> str:
-        import random
-
-        return (
-            f"{int(time.time() * 1_000_000):020x}-"
-            f"{random.getrandbits(64):016x}"
-        )
 
     def __str__(self) -> str:
         return self.value
@@ -207,7 +151,7 @@ class CaptionId:
 
 @dataclass(frozen=True)
 class ProviderId:
-    """Identifies a unique AI provider."""
+    """Identifies a unique AI provider by slug (e.g., 'openai', 'local')."""
 
     value: str = ""
 
@@ -257,11 +201,6 @@ class Duration:
         return self.milliseconds / 1000.0
 
     @property
-    def minutes(self) -> float:
-        """Convert to minutes."""
-        return self.seconds / 60.0
-
-    @property
     def as_hms(self) -> str:
         """Return HH:MM:SS format."""
         total_seconds = int(self.milliseconds / 1000)
@@ -297,7 +236,7 @@ class TimestampRange:
 
     start_ms: int = 0
     end_ms: int = 0
-    min_duration_ms: int = MIN_CLIP_DURATION_MS
+    min_duration_ms: int = 3000  # 3 seconds minimum
 
     def __post_init__(self) -> None:
         if self.start_ms < 0 or self.end_ms < 0:
@@ -368,7 +307,7 @@ class Resolution:
 
     @property
     def aspect_ratio(self) -> AspectRatio:
-        """Calculate the aspect ratio."""
+        """Calculate the simplified aspect ratio."""
         from math import gcd
 
         g = gcd(self.width, self.height)
@@ -480,16 +419,12 @@ class FileHash:
 
     def __post_init__(self) -> None:
         if not self.value:
-            object.__setattr__(self, "value", self._generate_empty_hash())
+            object.__setattr__(self, "value", hashlib.sha256(b"").hexdigest())
         elif not re.match(r"^[a-f0-9]{64}$", self.value):
             raise DomainValidationError(
                 "FileHash must be a 64-character hex string",
                 {"hash": self.value},
             )
-
-    @staticmethod
-    def _generate_empty_hash() -> str:
-        return hashlib.sha256(b"").hexdigest()
 
     @property
     def prefix(self) -> str:
@@ -498,25 +433,6 @@ class FileHash:
 
     def __str__(self) -> str:
         return self.value
-
-    def verify_file(self, file_path: str, chunk_size: int = 65_536) -> bool:
-        """Verify a file's SHA-256 hash matches this value.
-
-        Args:
-            file_path: Path to the file to verify.
-            chunk_size: Read buffer size in bytes.
-
-        Returns:
-            True if the file's hash matches, False otherwise.
-        """
-        hasher = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                hasher.update(chunk)
-        return hasher.hexdigest() == self.value
 
 
 @dataclass(frozen=True)
@@ -550,29 +466,6 @@ class FilePath:
         """File name without extension."""
         return os.path.splitext(os.path.basename(self.path))[0]
 
-    @property
-    def directory(self) -> str:
-        """Parent directory of the file."""
-        return os.path.dirname(self.path)
-
-    def is_within(self, base_path: str) -> bool:
-        """Check if this path is within the given base directory."""
-        resolved_path = os.path.realpath(self.path)
-        resolved_base = os.path.realpath(base_path)
-        return resolved_path.startswith(resolved_base + os.sep)
-
-    def resolve(self) -> str:
-        """Return the resolved (real) path, checking for traversal."""
-        if self.allowed_base:
-            resolved = os.path.realpath(self.path)
-            resolved_base = os.path.realpath(self.allowed_base)
-            if not resolved.startswith(resolved_base + os.sep) and resolved != resolved_base:
-                raise DomainValidationError(
-                    "Path traversal detected",
-                    {"path": self.path, "allowed_base": self.allowed_base},
-                )
-        return os.path.realpath(self.path)
-
     def is_video(self) -> bool:
         """Check if the file extension is a supported video format."""
         return self.extension in SUPPORTED_VIDEO_EXTENSIONS
@@ -588,12 +481,12 @@ class QualityScoreDimensions:
     """Individual quality score dimension values (0-100 each).
 
     Dimensions (per Vision Document §6):
-    - ``hook_strength`` (25 %): Compelling opening within first 3 seconds
-    - ``content_density`` (20 %): Information density per second
-    - ``audio_clarity`` (15 %): Speech clarity, noise floor
-    - ``visual_variety`` (15 %): Shot changes, camera movement
-    - ``structural_completeness`` (15 %): Beginning, middle, and end
-    - ``engagement_potential`` (10 %): Predicted retention
+    - hook_strength (25%)
+    - content_density (20%)
+    - audio_clarity (15%)
+    - visual_variety (15%)
+    - structural_completeness (15%)
+    - engagement_potential (10%)
     """
 
     hook_strength: int = 0
@@ -651,8 +544,7 @@ class QualityScoreDimensions:
 class QualityScore:
     """Composite quality score for a clip candidate.
 
-    Wraps ``QualityScoreDimensions`` and provides the weighted overall
-    score. A single overall score (0-100) can also be used.
+    A single overall score (0-100) with optional dimension breakdown.
     """
 
     overall: int = 0
@@ -668,7 +560,7 @@ class QualityScore:
 
     @classmethod
     def from_dimensions(cls, dimensions: QualityScoreDimensions) -> QualityScore:
-        """Create a QualityScore from dimensions using weighted average."""
+        """Create from dimensions using weighted average."""
         overall = round(dimensions.weighted_average())
         return cls(overall=overall, dimensions=dimensions)
 

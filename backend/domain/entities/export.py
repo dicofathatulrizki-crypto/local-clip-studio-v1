@@ -1,9 +1,5 @@
 """Export entity — a video/subtitle export job.
 
-An Export represents a single export job that renders a clip to a
-specific output format. The entity tracks job state, progress, and
-result location.
-
 Business rules:
     - Export transitions follow the ExportState machine (SRS §11.4)
     - Supported formats: mp4, mov, webm, srt, vtt, ass, edl, xml, json
@@ -13,10 +9,17 @@ Business rules:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from backend.domain.exceptions import DomainValidationError
 from backend.domain.state_machines import ExportState, validate_export_transition
+
+SUPPORTED_EXPORT_FORMATS: set[str] = {
+    "mp4", "mov", "webm", "srt", "vtt", "ass", "edl", "xml", "json",
+}
+VALID_PRESETS: set[str] = {"high", "standard", "web", "proxy"}
 
 
 @dataclass
@@ -25,7 +28,6 @@ class Export:
 
     Attributes:
         id: Unique export job identifier.
-        export_id: Alias for id (convenience for legacy compatibility).
         clip_id: Identifier of the clip being exported.
         format: Output format (mp4, mov, webm, srt, vtt, ass, etc.).
         preset: Quality preset name (high, standard, web, proxy).
@@ -51,37 +53,26 @@ class Export:
     created_at: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self) -> None:
-        self._validate()
         if not self.id:
-            import time
-
-            object.__setattr__(self, "id", f"exp-{int(time.time() * 1_000_000)}")
-
-    @property
-    def export_id(self) -> str:
-        """Alias for id for legacy compatibility."""
-        return self.id
+            object.__setattr__(self, "id", f"exp-{int(time.time() * 1_000_000)}-{id(self)}")
+        self._validate()
 
     def _validate(self) -> None:
         """Validate export invariants."""
-        from backend.domain.exceptions import DomainValidationError
-
-        SUPPORTED = {"mp4", "mov", "webm", "srt", "vtt", "ass", "edl", "xml", "json"}
-        if self.format.lower() not in SUPPORTED:
+        if self.format.lower() not in SUPPORTED_EXPORT_FORMATS:
             raise DomainValidationError(
                 f"Unsupported export format: '{self.format}'",
-                {"format": self.format, "supported": list(SUPPORTED)},
+                {"format": self.format, "supported": list(SUPPORTED_EXPORT_FORMATS)},
             )
         if not (0.0 <= self.progress <= 1.0):
             raise DomainValidationError(
                 "Progress must be between 0.0 and 1.0",
                 {"progress": self.progress},
             )
-        VALID_PRESETS = {"high", "standard", "web", "proxy", None}
-        if self.preset not in [None, "high", "standard", "web", "proxy"]:
+        if self.preset is not None and self.preset not in VALID_PRESETS:
             raise DomainValidationError(
                 f"Invalid preset: '{self.preset}'",
-                {"preset": self.preset, "valid": ["high", "standard", "web", "proxy"]},
+                {"preset": self.preset, "valid": list(VALID_PRESETS)},
             )
 
     # ------------------------------------------------------------------
@@ -95,11 +86,7 @@ class Export:
         self.started_at = datetime.now()
 
     def complete(self, output_path: str) -> None:
-        """Mark the export as completed with the output file path.
-
-        Args:
-            output_path: Path to the completed export file.
-        """
+        """Mark the export as completed."""
         validate_export_transition(self.status, ExportState.COMPLETED)
         self.status = ExportState.COMPLETED
         self.progress = 1.0
@@ -107,11 +94,7 @@ class Export:
         self.completed_at = datetime.now()
 
     def mark_failed(self, error_message: str) -> None:
-        """Mark the export as failed with an error message.
-
-        Args:
-            error_message: Description of what went wrong.
-        """
+        """Mark the export as failed."""
         validate_export_transition(self.status, ExportState.FAILED)
         self.status = ExportState.FAILED
         self.error_message = error_message
@@ -126,17 +109,8 @@ class Export:
     # ------------------------------------------------------------------
 
     def update_progress(self, progress: float) -> None:
-        """Update the export progress.
-
-        Args:
-            progress: Progress value 0.0–1.0.
-
-        Raises:
-            DomainValidationError: if progress is out of range.
-        """
+        """Update the export progress (0.0–1.0)."""
         if not (0.0 <= progress <= 1.0):
-            from backend.domain.exceptions import DomainValidationError
-
             raise DomainValidationError(
                 "Progress must be between 0.0 and 1.0",
                 {"progress": progress},
@@ -148,26 +122,30 @@ class Export:
     # ------------------------------------------------------------------
 
     @property
+    def export_id(self) -> str:
+        """Alias for id for compatibility."""
+        return self.id
+
+    @property
     def is_completed(self) -> bool:
-        """Check if the export completed successfully."""
         return self.status == ExportState.COMPLETED
 
     @property
     def is_failed(self) -> bool:
-        """Check if the export failed."""
         return self.status == ExportState.FAILED
 
     @property
     def is_rendering(self) -> bool:
-        """Check if the export is currently rendering."""
         return self.status == ExportState.RENDERING
 
     @property
+    def is_cancelled(self) -> bool:
+        return self.status == ExportState.CANCELLED
+
+    @property
     def is_pending(self) -> bool:
-        """Check if the export is pending."""
         return self.status == ExportState.PENDING
 
     @property
     def progress_percent(self) -> int:
-        """Progress as an integer percentage (0-100)."""
         return round(self.progress * 100)

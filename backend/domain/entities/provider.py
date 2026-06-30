@@ -1,113 +1,150 @@
-"""Provider entity — represents an AI provider configuration.
+"""Provider entity — an AI provider configuration.
 
-Supports local AI models, Ollama, LM Studio, OpenAI, Anthropic,
-Google Gemini, and other OpenAI-compatible providers.
+Represents a configured AI provider (local, OpenAI, Anthropic, Ollama, etc.)
+with its settings, enabled state, and supported capabilities.
+
+Business rules:
+    - API keys are encrypted at rest (encryption happens outside domain)
+    - Each provider supports specific task types (stt, llm, vision, etc.)
+    - Providers can be enabled/disabled without restart
+    - Fallback chains defined by task routing configuration
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
-from backend.domain.exceptions import ProviderError
-from backend.domain.value_objects import ProviderStatus
+from backend.domain.exceptions import DomainValidationError
+from backend.domain.value_objects import ProviderId
+
+SUPPORTED_TASK_TYPES: set[str] = {
+    "stt", "llm", "vision", "embedding", "translation", "caption", "export",
+}
 
 
 @dataclass
 class Provider:
-    """An AI service provider configuration.
+    """An AI provider configuration.
 
-    Business rules:
-    - Provider ID must be non-empty and unique
-    - API keys must be encrypted before storage (handled by service layer)
-    - Task routing maps AI tasks to provider-specific models
-    - Providers can be enabled/disabled independently
-    - At least local AI models must be supported (offline-first)
+    Attributes:
+        id: Unique provider identifier (slug, e.g., 'openai', 'local').
+        name: Human-readable provider name.
+        enabled: Whether this provider is currently active.
+        supported_tasks: Set of supported AI task types.
+        configured: Whether the provider has been fully configured.
+        api_key: Encrypted API key (encryption managed by infrastructure).
+        base_url: Base URL for API requests.
+        models: Mapping of task type to model name.
+        defaults: Default parameters (temperature, max_tokens, timeout, retry_count).
+        created_at: Timestamp of creation.
+        updated_at: Timestamp of last update.
     """
 
-    # ─── Identity ──────────────────────────────────────────
-    id: str = ""
-
-    # ─── Configuration ─────────────────────────────────────
+    id: ProviderId = field(default_factory=lambda: ProviderId(""))
+    name: str = ""
     enabled: bool = False
-    provider_type: str = ""  # "local", "openai", "anthropic", "ollama", etc.
-    config: dict[str, Any] = field(default_factory=dict)
-    task_routing: dict[str, str] = field(default_factory=dict)
-
-    # ─── Status ────────────────────────────────────────────
-    status: ProviderStatus = ProviderStatus.DISABLED
-
-    SUPPORTED_PROVIDER_TYPES: set[str] = {
-        "local", "openai", "anthropic", "google", "ollama",
-        "lm_studio", "openrouter", "groq", "nvidia_nim",
-        "together", "fireworks", "deepinfra", "mistral",
-    }
-
-    SUPPORTED_TASK_TYPES: set[str] = {
-        "stt", "llm", "vision", "caption", "translation", "embedding",
-    }
+    supported_tasks: list[str] = field(default_factory=list)
+    configured: bool = False
+    api_key: str | None = None
+    base_url: str | None = None
+    models: dict[str, str] = field(default_factory=dict)
+    defaults: dict[str, Any] = field(default_factory=lambda: {
+        "temperature": 0.7,
+        "max_tokens": 4096,
+        "timeout": 60,
+        "retry_count": 3,
+    })
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self) -> None:
-        if not self.id or not self.id.strip():
-            raise ProviderError("Provider ID cannot be empty")
-        if self.provider_type:
-            if self.provider_type not in self.SUPPORTED_PROVIDER_TYPES:
-                raise ProviderError(
-                    f"Unsupported provider type '{self.provider_type}'. "
-                    f"Supported: {', '.join(sorted(self.SUPPORTED_PROVIDER_TYPES))}"
-                )
+        self._validate()
+
+    def _validate(self) -> None:
+        """Validate provider invariants."""
+        if not self.name:
+            raise DomainValidationError("Provider name cannot be empty")
+        if self.supported_tasks:
+            for task in self.supported_tasks:
+                if task not in SUPPORTED_TASK_TYPES:
+                    raise DomainValidationError(
+                        f"Unsupported task type: '{task}'",
+                        {"task": task, "supported": list(SUPPORTED_TASK_TYPES)},
+                    )
+        temp = self.defaults.get("temperature", 0.7)
+        if not (0.0 <= temp <= 2.0):
+            raise DomainValidationError(
+                "Temperature must be between 0.0 and 2.0",
+                {"temperature": temp},
+            )
+        timeout = self.defaults.get("timeout", 60)
+        if timeout < 1:
+            raise DomainValidationError(
+                "Timeout must be at least 1 second",
+                {"timeout": timeout},
+            )
+
+    # ------------------------------------------------------------------
+    # Behaviour
+    # ------------------------------------------------------------------
 
     def enable(self) -> None:
         """Enable this provider."""
         self.enabled = True
-        self.status = ProviderStatus.ENABLED
+        self.updated_at = datetime.now()
 
     def disable(self) -> None:
         """Disable this provider."""
         self.enabled = False
-        self.status = ProviderStatus.DISABLED
+        self.updated_at = datetime.now()
 
-    def mark_error(self) -> None:
-        """Mark the provider as having an error state."""
-        self.status = ProviderStatus.ERROR
+    def mark_configured(self) -> None:
+        """Mark this provider as configured."""
+        self.configured = True
+        self.updated_at = datetime.now()
 
-    def assign_task(self, task_type: str, model_id: str) -> None:
-        """Assign a model to handle a specific AI task.
+    def set_api_key(self, api_key: str | None) -> None:
+        """Set the (already encrypted) API key."""
+        self.api_key = api_key
+        self.configured = api_key is not None
+        self.updated_at = datetime.now()
+
+    def set_base_url(self, base_url: str | None) -> None:
+        """Set the base URL for API requests."""
+        self.base_url = base_url
+        self.updated_at = datetime.now()
+
+    def set_model(self, task_type: str, model: str) -> None:
+        """Set the model for a specific task type.
 
         Args:
-            task_type: The AI task type (stt, llm, vision, etc.)
-            model_id: The model ID to use for this task
+            task_type: AI task type (stt, llm, vision, etc.).
+            model: Model identifier (e.g., 'gpt-4o', 'whisper-large-v3').
         """
-        if task_type not in self.SUPPORTED_TASK_TYPES:
-            raise ProviderError(
-                f"Unsupported task type '{task_type}'. "
-                f"Supported: {', '.join(sorted(self.SUPPORTED_TASK_TYPES))}"
+        if task_type not in SUPPORTED_TASK_TYPES:
+            raise DomainValidationError(
+                f"Unsupported task type: '{task_type}'",
+                {"task_type": task_type, "supported": list(SUPPORTED_TASK_TYPES)},
             )
-        if not model_id or not model_id.strip():
-            raise ProviderError(f"Model ID cannot be empty for task '{task_type}'")
-        self.task_routing[task_type] = model_id
+        self.models[task_type] = model
+        self.updated_at = datetime.now()
 
-    def remove_task_assignment(self, task_type: str) -> None:
-        """Remove the model assignment for a task type."""
-        self.task_routing.pop(task_type, None)
+    def update_defaults(self, defaults: dict[str, Any]) -> None:
+        """Update default parameters (merge semantics)."""
+        self.defaults.update(defaults)
+        self._validate()
+        self.updated_at = datetime.now()
 
-    def get_model_for_task(self, task_type: str) -> str | None:
-        """Get the configured model ID for a specific task.
+    # ------------------------------------------------------------------
+    # Queries
+    # ------------------------------------------------------------------
 
-        Args:
-            task_type: The AI task type.
+    def supports_task(self, task_type: str) -> bool:
+        """Check if this provider supports the given task type."""
+        return task_type in self.supported_tasks
 
-        Returns:
-            Model ID if configured, None otherwise.
-        """
-        return self.task_routing.get(task_type)
-
-    @property
-    def configured_tasks(self) -> list[str]:
-        """Get the list of AI tasks this provider is configured for."""
-        return list(self.task_routing.keys())
-
-    @property
-    def is_available(self) -> bool:
-        """Check if the provider is available for use."""
-        return self.enabled and self.status == ProviderStatus.ENABLED
+    def get_model_for(self, task_type: str) -> str | None:
+        """Get the configured model for a task type."""
+        return self.models.get(task_type)

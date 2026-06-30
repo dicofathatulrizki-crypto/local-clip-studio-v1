@@ -95,8 +95,7 @@ class InvalidClipRangeError(DomainValidationError):
 class InvalidQualityScoreError(DomainValidationError):
     """Raised when a quality score violates business rules.
 
-    Quality scores must be in [0, 100]. Dimension weights must sum
-    to 100 %.
+    Quality scores must be in [0, 100]. Dimension weights must sum to 100%.
     """
 
     def __init__(

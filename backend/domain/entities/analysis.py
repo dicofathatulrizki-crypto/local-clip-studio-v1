@@ -1,9 +1,5 @@
 """Analysis entity — results of the AI pipeline for a single video.
 
-The Analysis entity holds all the outputs from the multi-stage AI pipeline:
-transcript, speaker diarization, scene detection, semantic analysis,
-quality scoring, and clip generation inputs.
-
 Business rules:
     - Analysis status follows the pipeline state machine (SRS §11.3)
     - Pipeline stages execute sequentially; any stage can fail
@@ -16,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from backend.domain.exceptions import DomainValidationError, InvalidQualityScoreError
 from backend.domain.state_machines import AnalysisState, validate_analysis_transition
 from backend.domain.value_objects import AnalysisId, VideoId
 
@@ -29,14 +26,14 @@ class Analysis:
         video_id: Identifier of the analysed video.
         status: Current pipeline stage.
         transcript: Word-level transcript with segments, speakers, timing.
-        speakers: Speaker diarization results with segment assignments.
-        scenes: Detected scene boundaries with type classification.
+        speakers: Speaker diarization results.
+        scenes: Detected scene boundaries.
         topics: Topic segmentation results.
         keywords: Extracted keywords and key phrases.
         emotions: Per-segment emotion classifications.
-        hooks: Detected hook moments with engagement scores.
-        chapters: Generated chapter markers with titles.
-        quality_score: Overall quality score (0-100) per SRS §6.
+        hooks: Detected hook moments.
+        chapters: Generated chapter markers.
+        quality_score: Overall quality score (0-100).
         quality_dimensions: Per-dimension quality breakdown.
         duration_ms: Duration of the analysed video in milliseconds.
         started_at: Timestamp when processing began.
@@ -67,12 +64,8 @@ class Analysis:
 
     def _validate(self) -> None:
         """Validate analysis invariants."""
-        from backend.domain.exceptions import DomainValidationError
-
         if self.quality_score is not None:
             if not (0 <= self.quality_score <= 100):
-                from backend.domain.exceptions import InvalidQualityScoreError
-
                 raise InvalidQualityScoreError(
                     "Quality score must be between 0 and 100",
                     {"quality_score": self.quality_score},
@@ -175,11 +168,9 @@ class Analysis:
 
         Args:
             score: Overall quality score (0-100).
-            dimensions: Per-dimension breakdown (hook_strength, content_density, etc.).
+            dimensions: Per-dimension breakdown.
         """
         if not (0 <= score <= 100):
-            from backend.domain.exceptions import InvalidQualityScoreError
-
             raise InvalidQualityScoreError(
                 "Quality score must be between 0 and 100",
                 {"quality_score": score},
@@ -218,10 +209,3 @@ class Analysis:
             AnalysisState.SCORING,
         }
         return self.status in active_states
-
-    def has_stage(self, stage: AnalysisState) -> bool:
-        """Check if the pipeline has reached (or passed) a given stage."""
-        stage_order = list(AnalysisState)
-        current_idx = stage_order.index(self.status)
-        target_idx = stage_order.index(stage)
-        return current_idx >= target_idx
