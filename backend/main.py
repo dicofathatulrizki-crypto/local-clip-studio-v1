@@ -1,102 +1,102 @@
-"""
-FastAPI application entry point for Local Clip Studio.
+"""Application entry point for Local Clip Studio."""
 
-This module creates and configures the FastAPI application instance.
-"""
 from __future__ import annotations
 
+import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
-from backend.api.middleware import register_middleware
-from backend.config.settings import get_settings
-from backend.infrastructure.database import init_database
-from backend.infrastructure.errors import register_exception_handlers
-from backend.infrastructure.logging.logger import configure_logging, get_logger
-
-logger = get_logger(__name__)
+from backend import __version__, __app_name__
+from backend.config.settings import Settings, get_settings
+from backend.api.middleware import setup_middleware
 
 
-_db_manager_ref = None
-
-
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
-    settings = get_settings()
-
-    # Configure structured logging
-    configure_logging(settings.logging.level)
+    if settings is None:
+        settings = get_settings()
 
     app = FastAPI(
-        title="Local Clip Studio API",
-        description="Local-first AI-powered video editing application",
-        version="1.0.0",
-        docs_url="/docs" if settings.api.show_docs else None,
-        redoc_url="/redoc" if settings.api.show_docs else None,
+        title=__app_name__,
+        version=__version__,
+        docs_url="/api/docs" if settings.api.debug else None,
+        redoc_url="/api/redoc" if settings.api.debug else None,
+        openapi_url="/api/openapi.json" if settings.api.debug else None,
     )
 
-    # Register middleware (CORS, request ID, timing)
-    register_middleware(app)
+    # Configure middleware
+    setup_middleware(app, settings)
 
-    # Register exception handlers (AppError, ValueError, Exception)
-    register_exception_handlers(app)
-
-    # Startup event
-    @app.on_event("startup")
-    async def on_startup() -> None:
-        logger.info(
-            "Application starting",
-            extra={
-                "version": "1.0.0",
-                "api_host": settings.api.host,
-                "api_port": settings.api.port,
-                "storage_path": str(settings.app_directory),
-                "log_level": settings.logging.level,
-            },
+    # Health check endpoint
+    @app.get("/api/v1/system/health")
+    async def health_check():
+        return JSONResponse(
+            content={
+                "status": "ok",
+                "version": __version__,
+                "app_name": __app_name__,
+            }
         )
 
-        # Initialize database on startup
-        global _db_manager_ref
-        try:
-            db = await init_database()
-            _db_manager_ref = db
-            health = await db.health_check()
-            logger.info(
-                "Database initialized",
-                extra={"health": health},
-            )
-        except Exception as exc:
-            logger.critical(
-                "Database initialization failed",
-                extra={"error": str(exc)},
-            )
-            raise
+    # Register API routes (will be populated by B10)
+    _register_routes(app)
 
-    # Shutdown event
-    @app.on_event("shutdown")
-    async def on_shutdown() -> None:
-        logger.info("Application shutting down")
-        global _db_manager_ref
-        if _db_manager_ref is not None:
-            await _db_manager_ref.shutdown()
-            _db_manager_ref = None
-
-    # Root health check
-    @app.get("/health")
-    async def health_check() -> dict[str, str | dict]:
-        from backend.infrastructure.database.engine import get_db_manager
-
-        db = get_db_manager()
-        db_health = await db.health_check()
-
-        return {
-            "status": "ok",
-            "version": "1.0.0",
-            "app_name": "Local Clip Studio",
-            "database": db_health,
-        }
-
-    logger.info("Application created successfully")
     return app
 
 
-app = create_app()
+def _register_routes(app: FastAPI) -> None:
+    """Register API route modules (stubs for future modules)."""
+    pass
+
+
+def run_server() -> None:
+    """Run the FastAPI server."""
+    settings = get_settings()
+    uvicorn.run(
+        "backend.main:create_app",
+        host=settings.api.host,
+        port=settings.api.port,
+        reload=settings.api.debug,
+        factory=True,
+        log_level="info",
+    )
+
+
+def main() -> None:
+    """Main entry point."""
+    settings = get_settings()
+
+    # Configure logging
+    from backend.infrastructure.logging.logger import configure_logging
+
+    configure_logging(
+        level=settings.logging.level,
+        log_dir=settings.storage.effective_path / "logs",
+        json_format=settings.logging.format == "json",
+        file_max_mb=settings.logging.file_max_mb,
+        retention_days=settings.logging.retention_days,
+    )
+
+    from backend.infrastructure.logging.logger import get_logger
+
+    logger = get_logger("backend.main")
+    logger.info(
+        f"Starting {__app_name__} v{__version__}",
+        extra={"extra_fields": {"host": settings.api.host, "port": settings.api.port}},
+    )
+
+    # Initialize database
+    _init_database(settings)
+
+    run_server()
+
+
+def _init_database(settings: Settings) -> None:
+    """Initialize the database."""
+    from backend.infrastructure.database.engine import init_engine
+
+    init_engine(settings.database.effective_url)
+
+
+if __name__ == "__main__":
+    main()

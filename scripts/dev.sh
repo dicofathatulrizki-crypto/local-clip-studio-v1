@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start development servers for Local Clip Studio
+echo "=== Starting Local Clip Studio (Development) ==="
 
-echo "Starting Local Clip Studio (Development Mode)..."
-echo ""
+# Ensure we're in the project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_DIR"
 
-# Check if .env exists
-if [ -f .env ]; then
-    set -a
-    source .env
-    set +a
+# Activate virtual environment if present
+if [ -d "venv" ]; then
+    source venv/bin/activate
 fi
 
-# Start backend
-echo "Starting backend server on http://localhost:${LOCALCLIP_API_PORT:-8765}"
-echo "  Docs: http://localhost:${LOCALCLIP_API_PORT:-8765}/docs"
-echo ""
+# Export environment
+export LOCALCLIP_ENVIRONMENT=development
+export LOCALCLIP_API__DEBUG=true
 
-cd "$(dirname "$0")/.."
-uvicorn backend.main:app --reload --host "${LOCALCLIP_API_HOST:-0.0.0.0}" --port "${LOCALCLIP_API_PORT:-8765}" --log-level "${LOCALCLIP_LOG_LEVEL:-info}"
+# Start backend
+echo "Starting backend server on http://localhost:8765 ..."
+python -m backend.main

@@ -1,12 +1,15 @@
-"""
-API Gateway Layer for Local Clip Studio.
+"""API layer — FastAPI routes, middleware, and dependency injection."""
 
-Provides:
-- FastAPI application factory and configuration
-- HTTP route handlers organized by resource
-- Middleware (CORS, request ID, error handling)
-- Dependency injection providers
-- WebSocket manager for real-time events
+from backend.api.middleware import setup_middleware
+from backend.api.deps import (
+    get_settings,
+    get_db_session,
+    get_logger,
+)
 
-Communication boundary between the frontend (React SPA) and backend services.
-"""
+__all__ = [
+    "setup_middleware",
+    "get_settings",
+    "get_db_session",
+    "get_logger",
+]
