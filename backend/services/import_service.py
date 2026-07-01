@@ -17,11 +17,9 @@ from typing import Any
 
 from backend.domain.entities.project import Project
 from backend.infrastructure.database.repositories.project_repo import ProjectRepository
-from backend.infrastructure.database.repositories.project_video_repo import (
-    ProjectVideoRepository,
-)
-from backend.infrastructure.database.repositories.video_master_repo import (
+from backend.infrastructure.database.repositories.video_repo import (
     VideoMasterRepository,
+    ProjectVideoRepository,
 )
 from backend.infrastructure.errors import (
     ConflictError,
