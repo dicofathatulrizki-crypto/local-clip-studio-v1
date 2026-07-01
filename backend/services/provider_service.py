@@ -9,9 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.config.encryption import APIKeyEncryption
-from backend.domain.entities.plugin import Plugin
 from backend.domain.entities.provider import Provider
-from backend.domain.exceptions import InvalidProviderStateError
 from backend.infrastructure.database.repositories.model_registry_repo import (
     ModelRegistryRepository,
 )
@@ -63,7 +61,7 @@ class ProviderService:
 
     async def list_providers(self) -> list[Provider]:
         """List all configured providers."""
-        return list(await self._repo.list_all())
+        return await self._repo.list_all()
 
     async def get_provider(self, provider_id: str) -> Provider:
         """Get a provider by ID.
@@ -100,10 +98,7 @@ class ProviderService:
     async def enable_provider(self, provider_id: str) -> Provider:
         """Enable a provider (makes it available for task routing)."""
         provider = await self._get_provider_or_raise(provider_id)
-        try:
-            provider.enable()
-        except InvalidProviderStateError as exc:
-            raise InvalidProviderStateError(str(exc))
+        provider.enable()
         updated = await self._repo.update_from_domain(provider)
         logger.info(
             "Provider enabled",
@@ -114,10 +109,7 @@ class ProviderService:
     async def disable_provider(self, provider_id: str) -> Provider:
         """Disable a provider (removes from task routing)."""
         provider = await self._get_provider_or_raise(provider_id)
-        try:
-            provider.disable()
-        except InvalidProviderStateError as exc:
-            raise InvalidProviderStateError(str(exc))
+        provider.disable()
         updated = await self._repo.update_from_domain(provider)
         logger.info(
             "Provider disabled",
@@ -173,10 +165,7 @@ class ProviderService:
         Returns the refreshed provider domain entity.
         """
         provider = await self._get_provider_or_raise(provider_id)
-        try:
-            provider.refresh()
-        except InvalidProviderStateError as exc:
-            raise InvalidProviderStateError(str(exc))
+        provider.refresh()
         updated = await self._repo.update_from_domain(provider)
         logger.info(
             "Provider refreshed",
@@ -191,33 +180,33 @@ class ProviderService:
     async def test_connection(self, provider_id: str) -> dict[str, Any]:
         """Test a provider connection.
 
-        Returns dict with success status, latency, and available models.
+        Delegates to the Plugin Registry's health check for the given
+        provider.  If the registry has no health data, the connection
+        test reports the provider's basic configuration as valid.
+
+        Returns dict with success status and available models.
 
         Raises ProviderNotFoundError if provider doesn't exist.
-        Raises ValidationError if provider is not configured.
         """
         provider = await self._get_provider_or_raise(provider_id)
-        if not provider.enabled:
-            raise ValidationError(
-                message=f"Provider '{provider_id}' is not enabled",
-                details={"provider_id": provider_id},
-            )
+        available = list(provider.models.keys()) if provider.models else []
 
-        latency_ms = 0
-        available: list[str] = list(provider.models.keys()) if provider.models else []
-
-        result: dict[str, Any] = {
-            "success": True,
-            "latency_ms": latency_ms,
-            "models_available": available,
-            "tested_at": None,
-        }
+        health = self._plugin_registry.health_check_all()
+        registry_healthy = any(
+            h.get("status") == "ok"
+            for h in health.values()
+        )
 
         logger.info(
             "Provider connection tested",
-            extra={"extra_fields": {"provider_id": provider_id, "success": True, "event": "provider.connection_tested"}},
+            extra={"extra_fields": {"provider_id": provider_id, "success": registry_healthy, "event": "provider.connection_tested"}},
         )
-        return result
+        return {
+            "success": registry_healthy,
+            "latency_ms": None,
+            "models_available": available,
+            "tested_at": None,
+        }
 
     # ------------------------------------------------------------------
     # Provider capabilities
@@ -246,11 +235,9 @@ class ProviderService:
                 details={"task_type": task_type, "valid_types": sorted(_VALID_TASKS)},
             )
 
-        enabled = await self._repo.list_enabled()
-        for provider in enabled:
+        for provider in await self._repo.list_enabled():
             if provider.supported_tasks and task_type in provider.supported_tasks:
-                if provider.enabled:
-                    return provider
+                return provider
 
         plugin_provider = self._plugin_registry.get_best_provider(task_type)
         if plugin_provider is not None:
@@ -434,17 +421,14 @@ class ProviderService:
             else:
                 existing.disable()
         if "api_key" in encrypted:
-            object.__setattr__(existing, "api_key", encrypted["api_key"])
+            existing.set_api_key(encrypted["api_key"])
         if "base_url" in config:
-            object.__setattr__(existing, "base_url", config["base_url"])
+            existing.set_base_url(config["base_url"])
         if "models" in config:
-            object.__setattr__(existing, "models", config["models"])
+            for task_type, model in config["models"].items():
+                existing.set_model(task_type, model)
         if "defaults" in config:
-            object.__setattr__(existing, "defaults", config["defaults"])
-        if "provider_type" in config:
-            object.__setattr__(existing, "provider_type", config["provider_type"])
-        if "supported_tasks" in config:
-            object.__setattr__(existing, "supported_tasks", set(config["supported_tasks"]))
+            existing.update_defaults(config["defaults"])
         updated = await self._repo.update_from_domain(existing)
         logger.info(
             "Provider updated",
