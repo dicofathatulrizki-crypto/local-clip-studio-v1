@@ -27,6 +27,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Configure middleware
     setup_middleware(app, settings)
 
+    # Initialize database on startup
+    @app.on_event("startup")
+    async def on_startup():
+        from backend.infrastructure.database.engine import init_engine, create_all_tables
+        from backend.infrastructure.logging.logger import get_logger
+
+        logger = get_logger("backend.main")
+        init_engine(settings.database.effective_url)
+        await create_all_tables()
+        logger.info("Database initialized and tables created")
+
     # Health check endpoint
     @app.get("/api/v1/system/health")
     async def health_check():
@@ -92,16 +103,10 @@ def main() -> None:
 
 
 def _init_database(settings: Settings) -> None:
-    """Initialize the database and create tables."""
-    import asyncio
-    from backend.infrastructure.database.engine import init_engine, create_all_tables
+    """Initialize the database engine (tables created on app startup)."""
+    from backend.infrastructure.database.engine import init_engine
 
     init_engine(settings.database.effective_url)
-    try:
-        asyncio.run(create_all_tables())
-    except RuntimeError:
-        # Event loop already running - tables will be created on first access
-        pass
 
 
 if __name__ == "__main__":
