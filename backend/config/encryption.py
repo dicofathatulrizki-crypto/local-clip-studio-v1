@@ -1,174 +1,127 @@
-"""
-Secure storage of API keys using AES-256-GCM encryption.
+"""API key encryption using Fernet symmetric encryption."""
 
-Encryption keys are derived from a machine-specific identifier,
-ensuring that encrypted API keys cannot be decrypted on a different machine.
-
-Uses the `cryptography` library for Fernet (AES-256-CBC with HMAC) encryption.
-"""
 from __future__ import annotations
 
-import base64
 import os
 import platform
+import hashlib
 from pathlib import Path
-from threading import Lock
-from typing import Any
+from typing import ClassVar
 
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
-# ─── Key Derivation ─────────────────────────────────────────────
+from cryptography.fernet import Fernet, InvalidToken
 
 
-def _get_machine_secret() -> bytes:
-    """Derive a machine-specific secret for encryption key generation.
+class EncryptionKeyManager:
+    """Manages the encryption key for API key storage.
 
-    Combines multiple machine-identifying attributes to create a unique
-    but stable device identifier. This ensures encrypted keys are
-    bound to a specific machine.
+    The key is derived from a machine-specific identifier and stored
+    in the application config directory.
     """
-    parts = [
-        platform.node(),           # Hostname
-        platform.machine(),        # Architecture (x86_64, arm64)
-        platform.processor(),      # Processor info
-        os.name,                   # OS name (posix, nt)
-    ]
-    if os.path.exists("/etc/machine-id"):
-        try:
-            with open("/etc/machine-id") as f:
-                parts.append(f.read().strip())
-        except OSError:
-            pass
 
-    return "|".join(parts).encode("utf-8")
+    _instance: ClassVar[EncryptionKeyManager | None] = None
 
+    def __init__(self, config_dir: str | Path | None = None) -> None:
+        self._config_dir = Path(config_dir) if config_dir else self._default_config_dir()
+        self._key_path = self._config_dir / "key.der"
+        self._key: bytes | None = None
 
-def _derive_fernet_key(salt: bytes | None = None) -> tuple[bytes, bytes]:
-    """Derive a Fernet-compatible 32-byte key from machine-specific data.
+    @staticmethod
+    def _default_config_dir() -> Path:
+        """Get the default config directory."""
+        home = Path.home()
+        if os.name == "nt":
+            base = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
+        else:
+            base = home
+        return base / ".localclip" / "config"
 
-    Returns (key, salt) tuple. Salt can be persisted to allow key
-    regeneration across application restarts.
-    """
-    if salt is None:
-        salt = os.urandom(16)
+    def _derive_machine_key(self) -> bytes:
+        """Derive a machine-specific encryption key."""
+        machine_id = platform.node() or "unknown"
+        machine_id += os.name
+        machine_id += str(hashlib.sha256(str(Path.home()).encode()).hexdigest())
+        digest = hashlib.sha256(machine_id.encode("utf-8")).digest()
+        return digest
 
-    secret = _get_machine_secret()
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=600_000,
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(secret))
-    return key, salt
+    def _ensure_config_dir(self) -> None:
+        """Ensure the config directory exists."""
+        self._config_dir.mkdir(parents=True, exist_ok=True)
 
+    def get_or_create_key(self) -> bytes:
+        """Get existing key or create a new one."""
+        if self._key is not None:
+            return self._key
 
-# ─── Encryption Service ─────────────────────────────────────────
+        self._ensure_config_dir()
+
+        if self._key_path.exists():
+            self._key = self._key_path.read_bytes()
+        else:
+            raw_key = self._derive_machine_key()
+            self._key = raw_key
+            self._key_path.write_bytes(raw_key)
+            self._key_path.chmod(0o600)
+
+        return self._key
+
+    def get_key(self) -> bytes | None:
+        """Get the encryption key if it exists."""
+        if self._key is not None:
+            return self._key
+        if self._key_path.exists():
+            self._key = self._key_path.read_bytes()
+            return self._key
+        return None
+
+    def reset_key(self) -> None:
+        """Reset the key (invalidates existing encrypted data)."""
+        self._key = None
+        if self._key_path.exists():
+            self._key_path.unlink()
+
+    @classmethod
+    def get_instance(cls) -> EncryptionKeyManager:
+        """Get the singleton instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
 
 
 class APIKeyEncryption:
-    """Encrypts and decrypts API keys using a machine-specific key.
+    """Encrypts and decrypts API keys using Fernet."""
 
-    The encryption key is derived on first use and cached in-memory.
-    The salt is persisted to ~/.localclip/config/key.salt so that
-    the same key can be regenerated across application restarts.
-    """
-
-    def __init__(self, config_dir: str | Path | None = None) -> None:
-        if config_dir is None:
-            config_dir = Path.home() / ".localclip" / "config"
-        self._config_dir = Path(config_dir)
-        self._config_dir.mkdir(parents=True, exist_ok=True)
-
+    def __init__(self, key_manager: EncryptionKeyManager | None = None) -> None:
+        self._key_manager = key_manager or EncryptionKeyManager.get_instance()
         self._fernet: Fernet | None = None
-        self._lock = Lock()
 
-    @property
-    def key_path(self) -> Path:
-        return self._config_dir / "key.salt"
-
-    def _get_or_create_key(self) -> Fernet:
-        """Get the cached Fernet instance or create one from persisted salt."""
-        if self._fernet is not None:
-            return self._fernet
-
-        with self._lock:
-            if self._fernet is not None:
-                return self._fernet
-
-            # Load existing salt or create new one
-            if self.key_path.exists():
-                salt = self.key_path.read_bytes()
-            else:
-                salt = os.urandom(16)
-                self.key_path.write_bytes(salt)
-
-            key, _ = _derive_fernet_key(salt)
-            self._fernet = Fernet(key)
-            return self._fernet
+    def _get_fernet(self) -> Fernet:
+        """Get or create the Fernet cipher."""
+        if self._fernet is None:
+            key = self._key_manager.get_or_create_key()
+            encoded_key = Fernet.generate_key()
+            self._fernet = Fernet(encoded_key)
+        return self._fernet
 
     def encrypt(self, plaintext: str) -> str:
-        """Encrypt a string (e.g., API key) and return base64-encoded ciphertext."""
-        if not plaintext:
-            return ""
-        fernet = self._get_or_create_key()
+        """Encrypt a string value."""
+        fernet = self._get_fernet()
         token = fernet.encrypt(plaintext.encode("utf-8"))
         return token.decode("utf-8")
 
     def decrypt(self, ciphertext: str) -> str:
-        """Decrypt a base64-encoded ciphertext back to the original string."""
-        if not ciphertext:
-            return ""
-        fernet = self._get_or_create_key()
-        token = fernet.decrypt(ciphertext.encode("utf-8"))
-        return token.decode("utf-8")
+        """Decrypt a string value."""
+        fernet = self._get_fernet()
+        try:
+            plaintext = fernet.decrypt(ciphertext.encode("utf-8"))
+            return plaintext.decode("utf-8")
+        except InvalidToken:
+            raise ValueError("Failed to decrypt: invalid token or key mismatch")
 
-    def encrypt_dict(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Encrypt all string values in a dictionary (for API keys in provider config)."""
-        result = {}
-        for key, value in data.items():
-            if isinstance(value, str) and value and not value.startswith("gAAAAA"):
-                result[key] = self.encrypt(value)
-            else:
-                result[key] = value
-        return result
-
-    def decrypt_dict(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Decrypt all string values in a dictionary."""
-        result = {}
-        for key, value in data.items():
-            if isinstance(value, str) and value.startswith("gAAAAA"):  # Fernet prefix
-                result[key] = self.decrypt(value)
-            else:
-                result[key] = value
-        return result
-
-
-# ─── Global Instance ────────────────────────────────────────────
-
-_encryption_instance: APIKeyEncryption | None = None
-_encryption_lock = Lock()
-
-
-def get_encryption() -> APIKeyEncryption:
-    """Get the global APIKeyEncryption instance (thread-safe)."""
-    global _encryption_instance
-    if _encryption_instance is not None:
-        return _encryption_instance
-
-    with _encryption_lock:
-        if _encryption_instance is None:
-            _encryption_instance = APIKeyEncryption()
-    return _encryption_instance
-
-
-def encrypt_api_key(plaintext: str) -> str:
-    """Convenience function: encrypt an API key."""
-    return get_encryption().encrypt(plaintext)
-
-
-def decrypt_api_key(ciphertext: str) -> str:
-    """Convenience function: decrypt an API key."""
-    return get_encryption().decrypt(ciphertext)
+    @staticmethod
+    def is_encrypted(value: str) -> bool:
+        """Check if a string looks like a Fernet token."""
+        try:
+            Fernet(value.encode("utf-8"))
+            return True
+        except Exception:
+            return False

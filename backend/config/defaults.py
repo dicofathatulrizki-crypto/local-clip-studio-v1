@@ -1,79 +1,53 @@
-"""
-Default configuration values for Local Clip Studio.
+"""Default configuration values."""
 
-These values are used when the configuration file is missing or
-a setting is not present. Organized by settings category.
-"""
-from __future__ import annotations
+from pathlib import Path
 
-# ─── General ────────────────────────────────────────────────────
 
-GENERAL_DEFAULTS = {
-    "language": "en",
-    "startup_behavior": "restore_last_project",
-    "auto_save_interval_seconds": 60,
-}
+def get_default_storage_path() -> Path:
+    """Get the default application storage path."""
+    from backend.config.settings import _get_default_storage_path
 
-# ─── Appearance ─────────────────────────────────────────────────
+    return _get_default_storage_path()
 
-APPEARANCE_DEFAULTS = {
-    "theme": "dark",
-    "accent_color": "#c89b5e",
-    "panel_layout": "default",
-}
 
-# ─── Storage ────────────────────────────────────────────────────
-
-STORAGE_DEFAULTS = {
-    "max_project_size_gb": 200,
-    "max_cache_size_gb": 50,
-    "max_model_storage_gb": 100,
-    "auto_cleanup_enabled": True,
-    "cleanup_interval_hours": 24,
-    "cache_retention_days": 7,
-}
-
-# ─── GPU ────────────────────────────────────────────────────────
-
-GPU_DEFAULTS = {
-    "backend": "auto",
-    "memory_limit_percent": 80,
-    "enable_cpu_fallback": True,
-    "max_concurrent_gpu_tasks": 2,
-}
-
-# ─── Export ─────────────────────────────────────────────────────
-
-EXPORT_DEFAULTS = {
-    "default_format": "mp4",
-    "default_preset": "standard",
-    "default_output_dir": None,
-    "gpu_encoding": True,
-    "include_captions": True,
-}
-
-# ─── Shortcuts ──────────────────────────────────────────────────
-
-SHORTCUT_DEFAULTS = {
-    "play_pause": "Space",
-    "split": "S",
-    "trim_start": "I",
-    "trim_end": "O",
-    "undo": "Mod+Z",
-    "redo": "Mod+Shift+Z",
-    "save": "Mod+S",
-    "delete": "Delete",
-    "ripple_delete": "Shift+Delete",
-    "toggle_marker": "M",
-}
-
-# ─── Complete Defaults ──────────────────────────────────────────
-
-ALL_DEFAULTS = {
-    "general": GENERAL_DEFAULTS,
-    "appearance": APPEARANCE_DEFAULTS,
-    "storage": STORAGE_DEFAULTS,
-    "gpu": GPU_DEFAULTS,
-    "export": EXPORT_DEFAULTS,
-    "shortcuts": SHORTCUT_DEFAULTS,
+DEFAULT_SETTINGS: dict = {
+    "general": {
+        "language": "en",
+        "startup_behavior": "last_project",
+        "auto_save_interval_seconds": 60,
+    },
+    "appearance": {
+        "theme": "dark",
+        "accent_color": "#c89b5e",
+        "panel_layout": "default",
+    },
+    "storage": {
+        "per_project_source_limit_gb": 200,
+        "global_cache_limit_gb": 50,
+        "model_storage_limit_gb": 100,
+        "log_limit_mb": 500,
+        "temp_limit_gb": 20,
+        "cleanup_interval_minutes": 60,
+    },
+    "gpu": {
+        "backend": "auto",
+        "memory_headroom": 0.2,
+        "memory_limit_mb": None,
+    },
+    "export": {
+        "default_format": "mp4",
+        "default_preset": "standard",
+        "output_directory": None,
+    },
+    "cache": {
+        "analysis_ttl_days": 30,
+        "audio_ttl_days": 7,
+        "frame_ttl_days": 7,
+        "thumbnail_ttl_days": 30,
+    },
+    "advanced": {
+        "debug_logging": False,
+        "developer_mode": False,
+        "plugin_directory": None,
+    },
 }
