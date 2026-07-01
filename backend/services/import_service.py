@@ -6,13 +6,15 @@ No SQLAlchemy, no FastAPI, no HTTP logic.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import tempfile
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from backend.domain.entities.project import Project
-from backend.domain.entities.project_video import ProjectVideo
 from backend.domain.entities.video import Video as DomainVideo
 from backend.domain.exceptions import InvalidVideoFormatError
 from backend.infrastructure.database.repositories.project_repo import ProjectRepository
@@ -35,6 +37,22 @@ logger = get_logger("backend.services.import_service")
 
 _SUPPORTED_EXTENSIONS: set[str] = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
 _DEFAULT_MAX_FILE_SIZE: int = 50 * 1024 ** 3
+
+
+@dataclass
+class ImportResult:
+    """Lightweight result object for import operations.
+
+    Not a domain entity — SRS §5 defines ProjectVideo as a join table
+    with no domain behaviour. This is a service-level DTO.
+    """
+    id: str = ""
+    project_id: str = ""
+    video_id: str = ""
+    source_path: str = ""
+    proxy_path: str | None = None
+    status: str = "importing"
+    imported_at: datetime | None = None
 
 
 class ImportService:
@@ -64,7 +82,7 @@ class ImportService:
 
     async def import_file(
         self, project_id: str, file_path: str | Path, generate_proxy: bool = True
-    ) -> ProjectVideo:
+    ) -> ImportResult:
         """Import a local video file into a project (SRS §10.2 import_file)."""
         project = await self._load_project(project_id)
         path = Path(file_path)
@@ -127,12 +145,13 @@ class ImportService:
             self._remove_file(storage)
             raise
 
-        pv = ProjectVideo(
+        result = ImportResult(
             id=str(pv_orm.id),
             project_id=project_id,
             video_id=str(created_vm.id),
             source_path=str(storage),
-            added_at=datetime.now(timezone.utc),
+            status="ready",
+            imported_at=datetime.now(timezone.utc),
         )
 
         logger.info(
@@ -143,14 +162,15 @@ class ImportService:
                 "event": "video.import.completed",
             }},
         )
-        return pv
+        return result
 
-    async def import_url(self, project_id: str, url: str) -> ProjectVideo:
+    async def import_url(self, project_id: str, url: str) -> ImportResult:
         """Import a video from a URL (SRS §10.2 import_url)."""
         project = await self._load_project(project_id)
         if not url or not url.startswith(("http://", "https://")):
             raise ValidationError(message="Invalid URL", details={"url": url})
 
+        import shutil
         download_path = await self._download_url(url)
         try:
             result = await self.import_file(project_id, download_path, generate_proxy=True)
@@ -162,10 +182,11 @@ class ImportService:
             )
             return result
         except Exception:
-            self._remove_file(download_path)
             raise
+        finally:
+            shutil.rmtree(download_path.parent, ignore_errors=True)
 
-    async def get_import_status(self, project_video_id: str) -> ProjectVideo:
+    async def get_import_status(self, project_video_id: str) -> ImportResult:
         """Get import status by project-video ID."""
         pv = await self._pv_repo.get(project_video_id)
         if pv is None:
@@ -173,13 +194,14 @@ class ImportService:
                 message=f"Import record not found: {project_video_id}",
                 details={"project_video_id": project_video_id},
             )
-        return ProjectVideo(
+        return ImportResult(
             id=str(pv.id),
             project_id=str(pv.project_id),
             video_id=str(pv.video_id),
             source_path=str(pv.source_path),
             proxy_path=getattr(pv, "proxy_path", None),
-            added_at=getattr(pv, "added_at", datetime.now(timezone.utc)),
+            status="ready" if getattr(pv, "proxy_path", None) else "importing",
+            imported_at=getattr(pv, "added_at", datetime.now(timezone.utc)),
         )
 
     async def cancel_import(self, project_video_id: str) -> None:
