@@ -132,8 +132,10 @@ class TestList:
 
     async def test_list_default(self, service, mock_repo, sample_project):
         """Test listing projects with default parameters."""
-        mock_repo.list_domain = AsyncMock(return_value=([sample_project], 1))
+        mock_repo.domain_list = AsyncMock(return_value=([sample_project], 1))
         mock_repo.count = AsyncMock(return_value=1)
+        # Override the list_domain method on the mock_repo that was passed to service
+        mock_repo.list_domain = AsyncMock(return_value=([sample_project], 1))
 
         projects, total = await service.list()
         assert len(projects) == 1

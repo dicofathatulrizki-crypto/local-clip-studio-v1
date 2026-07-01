@@ -529,8 +529,8 @@ class ProjectService:
         Returns:
             True if a project with this name exists, False otherwise.
         """
-        projects, _ = await self.list(limit=100, sort="name")
-        return any(p.name.lower() == name.strip().lower() for p in projects)
+        projects = await self._repo.search_domain_by_name(query=name.strip(), limit=1)
+        return len(projects) > 0
 
     async def get_storage_info(self, project_id: str) -> dict[str, Any]:
         """Get storage usage information for a project.
