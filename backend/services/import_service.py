@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -166,11 +167,9 @@ class ImportService:
 
     async def import_url(self, project_id: str, url: str) -> ImportResult:
         """Import a video from a URL (SRS §10.2 import_url)."""
-        project = await self._load_project(project_id)
         if not url or not url.startswith(("http://", "https://")):
             raise ValidationError(message="Invalid URL", details={"url": url})
 
-        import shutil
         download_path = await self._download_url(url)
         try:
             result = await self.import_file(project_id, download_path, generate_proxy=True)
@@ -356,7 +355,6 @@ class ImportService:
 
     async def _download_url(self, url: str) -> Path:
         """Download a video from a URL to a temp path."""
-        import tempfile
         tmp = Path(tempfile.mkdtemp(prefix="url_import_"))
         output = tmp / "downloaded_video.mp4"
         try:
