@@ -1,43 +1,27 @@
-"""
-ProviderConfig model — stores AI provider configurations.
+"""ProviderConfig ORM model — AI provider configuration."""
 
-Each provider (OpenAI, local, Ollama, etc.) has configuration including
-enabled status, encrypted API keys, and task routing preferences.
-"""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import JSON
 
-from backend.infrastructure.database.base import Base
+from backend.infrastructure.database.engine import Base
+from backend.infrastructure.database.models.base import UUIDMixin
 
 
-class ProviderConfig(Base):
-    """AI provider configuration.
-
-    Each row represents one configured AI provider (e.g., openai, local, ollama).
-    Configuration values are stored as JSON and may include encrypted API keys.
-    """
+class ProviderConfig(UUIDMixin, Base):
+    """AI provider configuration — API keys, models, settings."""
 
     __tablename__ = "provider_configs"
 
-    # ─── Fields ────────────────────────────────────────────────
-    provider_id: Mapped[str] = mapped_column(String(50), primary_key=True)
-    enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
-    config: Mapped[dict] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
-    task_routing: Mapped[dict] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        default=datetime.now(UTC),
-        onupdate=datetime.now(UTC),
-    )
+    provider_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    provider_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    api_key_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    base_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    models: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=dict)
+    defaults: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=dict)
+    supported_tasks: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
