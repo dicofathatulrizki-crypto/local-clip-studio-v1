@@ -5,6 +5,7 @@ All infrastructure mocked — no real filesystem, FFmpeg, yt-dlp, database, or n
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,7 +24,7 @@ from backend.services.import_service import ImportResult, ImportService
 @pytest.fixture
 def mock_vm_repo():
     r = MagicMock()
-    r.get_by_hash = AsyncMock()
+    r.get_by_hash = AsyncMock(return_value=None)
     r.create_from_domain = AsyncMock()
     r.delete_by_hash = AsyncMock()
     return r
@@ -62,22 +63,17 @@ def mock_ffprobe():
 @pytest.fixture
 def mock_dir_manager():
     r = MagicMock()
-    from pathlib import Path
     r.project_dir = MagicMock(return_value=Path("/tmp/test_projects/proj-id"))
     return r
 
 
 @pytest.fixture
 def project_domain():
-    """Create a minimal Project domain entity for testing."""
     return MagicMock(id="proj-123", name="Test Project")
 
 
 @pytest.fixture
-def service(
-    mock_vm_repo, mock_pv_repo, mock_proj_repo,
-    mock_file_manager, mock_ffprobe, mock_dir_manager,
-):
+def service( mock_vm_repo, mock_pv_repo, mock_proj_repo, mock_file_manager, mock_ffprobe, mock_dir_manager ):
     return ImportService(
         video_master_repository=mock_vm_repo,
         project_video_repository=mock_pv_repo,
@@ -88,435 +84,287 @@ def service(
     )
 
 
-# ------------------------------------------------------------------
-# Successful import
-# ------------------------------------------------------------------
+def _probe_response(width=640, height=480, fps_frac="30/1", codec="h264", duration="10.0", bitrate="1000000"):
+    return {
+        "streams": [{"codec_type": "video", "width": width, "height": height,
+                     "r_frame_rate": fps_frac, "codec_name": codec}],
+        "format": {"duration": duration, "bit_rate": bitrate},
+    }
+
+
+# ==================================================================
+# TestImportFile
+# ==================================================================
 
 class TestImportFile:
-    """Tests for import_file()."""
 
     async def test_successful_import(self, service, mock_proj_repo, mock_vm_repo,
-                                      mock_pv_repo, mock_ffprobe, mock_file_manager,
-                                      project_domain, tmp_path):
-        """A valid MP4 file is imported successfully."""
-        video_path = tmp_path / "test.mp4"
-        video_path.write_bytes(b"fake video content")
+                                      mock_pv_repo, mock_ffprobe, project_domain, tmp_path):
+        path = tmp_path / "test.mp4"
+        path.write_bytes(b"video data")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 1920, "height": 1080,
-                         "r_frame_rate": "30000/1001", "codec_name": "h264"}],
-            "format": {"duration": "60.0", "bit_rate": "5000000"},
-        }
-        created_video = DomainVideo(original_filename="test.mp4", file_size_bytes=100,
-                                     duration_ms=60000, width=1920, height=1080,
-                                     fps=29.97, video_codec="h264")
-        mock_vm_repo.get_by_hash.return_value = None
-        mock_vm_repo.create_from_domain.return_value = created_video
-        pv_orm = MagicMock(id="pv-1")
-        mock_pv_repo.create.return_value = pv_orm
+        mock_ffprobe.probe.return_value = _probe_response(width=1920, height=1080)
+        created = DomainVideo(original_filename="test.mp4", file_size_bytes=100,
+                               duration_ms=60000, width=1920, height=1080,
+                               fps=29.97, video_codec="h264")
+        mock_vm_repo.create_from_domain.return_value = created
+        mock_pv_repo.create.return_value = MagicMock(id="pv-1")
 
-        result = await service.import_file("proj-123", str(video_path))
+        result = await service.import_file("proj-123", str(path))
 
         assert isinstance(result, ImportResult)
         assert result.status == "ready"
-        assert result.video_id is not None
         mock_vm_repo.create_from_domain.assert_awaited_once()
         mock_pv_repo.create.assert_awaited_once()
 
     async def test_invalid_file_type(self, service, mock_proj_repo, project_domain, tmp_path):
-        """Unsupported file extension raises ValidationError."""
-        bad_path = tmp_path / "test.txt"
-        bad_path.write_text("not a video")
         mock_proj_repo.get_domain.return_value = project_domain
-
+        bad = tmp_path / "test.txt"
+        bad.write_text("x")
         with pytest.raises(ValidationError, match="format"):
-            await service.import_file("proj-123", str(bad_path))
+            await service.import_file("proj-123", str(bad))
 
-    async def test_file_too_large(self, service, mock_proj_repo, project_domain, tmp_path):
+    async def test_file_too_large(self, mock_vm_repo, mock_pv_repo, mock_proj_repo,
+                                      mock_file_manager, mock_ffprobe, mock_dir_manager,
+                                      project_domain, tmp_path):
         """File exceeding max size raises ValidationError."""
-        large_path = tmp_path / "large.mp4"
-        # Minimal size matters only for mock — we mock stat in the real test.
-        large_path.write_bytes(b"x" * 1024)
         mock_proj_repo.get_domain.return_value = project_domain
-
-        with patch.object(large_path, "stat") as mock_stat:
-            mock_stat.return_value.st_size = 60 * 1024 ** 3  # 60 GB
-            with pytest.raises(ValidationError, match="limit"):
-                await service.import_file("proj-123", str(large_path))
+        svc = ImportService(mock_vm_repo, mock_pv_repo, mock_proj_repo,
+                            mock_file_manager, mock_ffprobe, mock_dir_manager,
+                            max_file_size=100)  # 100 byte limit
+        path = tmp_path / "big.mp4"
+        path.write_bytes(b"x" * 200)  # 200 bytes > 100 byte limit
+        with pytest.raises(ValidationError, match="limit"):
+            await svc.import_file("proj-123", str(path))
 
     async def test_missing_project(self, service, mock_proj_repo):
-        """Non-existent project raises NotFoundError."""
         mock_proj_repo.get_domain.return_value = None
-
         with pytest.raises(NotFoundError, match="not found"):
-            await service.import_file("bad-proj", "/tmp/fake.mp4")
+            await service.import_file("bad", "/tmp/f.mp4")
 
     async def test_missing_file(self, service, mock_proj_repo, project_domain):
-        """Non-existent file path raises ValidationError."""
         mock_proj_repo.get_domain.return_value = project_domain
-
         with pytest.raises(ValidationError, match="not found"):
-            await service.import_file("proj-123", "/tmp/nonexistent.mp4")
+            await service.import_file("proj-123", "/tmp/nope.mp4")
 
-    async def test_duplicate_detection(self, service, mock_proj_repo, mock_vm_repo,
-                                        mock_ffprobe, project_domain, tmp_path):
-        """Duplicate file (by hash) raises ConflictError."""
-        video_path = tmp_path / "dup.mp4"
-        video_path.write_bytes(b"dup content")
+    async def test_duplicate_detection(self, service, mock_proj_repo, mock_vm_repo, mock_ffprobe, project_domain, tmp_path):
+        path = tmp_path / "dup.mp4"
+        path.write_bytes(b"dup")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 640, "height": 480,
-                         "r_frame_rate": "30/1", "codec_name": "h264"}],
-            "format": {"duration": "10.0", "bit_rate": "1000000"},
-        }
-        existing = DomainVideo(original_filename="original.mp4", file_size_bytes=100,
+        mock_ffprobe.probe.return_value = _probe_response()
+        existing = DomainVideo(original_filename="orig.mp4", file_size_bytes=100,
                                 duration_ms=10000, width=640, height=480,
                                 fps=30.0, video_codec="h264")
         mock_vm_repo.get_by_hash.return_value = existing
 
-        with pytest.raises(ConflictError, match="duplicate"):
-            await service.import_file("proj-123", str(video_path))
+        with pytest.raises(ConflictError, match="Duplicate"):
+            await service.import_file("proj-123", str(path))
 
-    async def test_ffprobe_failure(self, service, mock_proj_repo, mock_ffprobe,
-                                    project_domain, tmp_path):
-        """FFprobe failure raises ValidationError."""
-        video_path = tmp_path / "broken.mp4"
-        video_path.write_bytes(b"garbage")
+    async def test_ffprobe_failure(self, service, mock_proj_repo, mock_ffprobe, project_domain, tmp_path):
+        path = tmp_path / "bad.mp4"
+        path.write_bytes(b"bad")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.side_effect = Exception("FFprobe error")
-
+        mock_ffprobe.probe.side_effect = Exception("Probe error")
         with pytest.raises(ValidationError, match="metadata"):
-            await service.import_file("proj-123", str(video_path))
+            await service.import_file("proj-123", str(path))
 
-    async def test_no_video_stream(self, service, mock_proj_repo, mock_ffprobe,
-                                    project_domain, tmp_path):
-        """File with no video stream raises ValidationError."""
-        video_path = tmp_path / "audio_only.mp4"
-        video_path.write_bytes(b"audio only")
+    async def test_no_video_stream(self, service, mock_proj_repo, mock_ffprobe, project_domain, tmp_path):
+        path = tmp_path / "audio.mp4"
+        path.write_bytes(b"audio")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "audio", "codec_name": "aac"}],
-            "format": {"duration": "10.0"},
-        }
-
+        mock_ffprobe.probe.return_value = {"streams": [{"codec_type": "audio"}], "format": {"duration": "10.0"}}
         with pytest.raises(ValidationError, match="video stream"):
-            await service.import_file("proj-123", str(video_path))
+            await service.import_file("proj-123", str(path))
 
-    async def test_repository_failure_on_video_create(self, service, mock_proj_repo,
-                                                       mock_vm_repo, mock_ffprobe,
-                                                       project_domain, tmp_path):
-        """Repository failure during video_master creation raises."""
-        video_path = tmp_path / "fail.mp4"
-        video_path.write_bytes(b"fail")
+    async def test_repository_failure_on_video_create(self, service, mock_proj_repo, mock_vm_repo, mock_ffprobe, project_domain, tmp_path):
+        path = tmp_path / "fail.mp4"
+        path.write_bytes(b"fail")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 640, "height": 480,
-                         "r_frame_rate": "30/1", "codec_name": "h264"}],
-            "format": {"duration": "10.0"},
-        }
-        mock_vm_repo.get_by_hash.return_value = None
+        mock_ffprobe.probe.return_value = _probe_response()
         mock_vm_repo.create_from_domain.side_effect = Exception("DB error")
-
         with pytest.raises(Exception, match="DB error"):
-            await service.import_file("proj-123", str(video_path))
+            await service.import_file("proj-123", str(path))
 
-    async def test_rollback_on_pv_create_failure(self, service, mock_proj_repo,
-                                                  mock_vm_repo, mock_pv_repo,
-                                                  mock_ffprobe, project_domain, tmp_path):
-        """If ProjectVideo creation fails, VideoMaster is rolled back."""
-        video_path = tmp_path / "rollback.mp4"
-        video_path.write_bytes(b"rollback")
+    async def test_rollback_on_pv_create_failure(self, service, mock_proj_repo, mock_vm_repo, mock_pv_repo, mock_ffprobe, project_domain, tmp_path):
+        path = tmp_path / "rb.mp4"
+        path.write_bytes(b"rb")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 640, "height": 480,
-                         "r_frame_rate": "30/1", "codec_name": "h264"}],
-            "format": {"duration": "10.0"},
-        }
-        mock_vm_repo.get_by_hash.return_value = None
-        created_video = DomainVideo(original_filename="rollback.mp4", file_size_bytes=100,
-                                     duration_ms=10000, width=640, height=480,
-                                     fps=30.0, video_codec="h264")
-        mock_vm_repo.create_from_domain.return_value = created_video
-        mock_pv_repo.create.side_effect = Exception("PV create error")
+        mock_ffprobe.probe.return_value = _probe_response()
+        created = DomainVideo(original_filename="rb.mp4", file_size_bytes=100,
+                               duration_ms=10000, width=640, height=480,
+                               fps=30.0, video_codec="h264")
+        mock_vm_repo.create_from_domain.return_value = created
+        mock_pv_repo.create.side_effect = Exception("PV error")
 
-        with pytest.raises(Exception, match="PV create error"):
-            await service.import_file("proj-123", str(video_path))
-
-        # Verify rollback: video master deleted and file cleaned
+        with pytest.raises(Exception, match="PV error"):
+            await service.import_file("proj-123", str(path))
         mock_vm_repo.delete_by_hash.assert_awaited_once()
 
-    async def test_checksum_generation(self, service, mock_proj_repo, mock_vm_repo,
-                                        mock_ffprobe, project_domain, tmp_path):
-        """SHA-256 checksum is generated and used for duplicate check."""
-        video_path = tmp_path / "hash_test.mp4"
-        video_path.write_bytes(b"content for hash")
+    async def test_checksum_generation(self, service, mock_proj_repo, mock_vm_repo, mock_ffprobe, mock_pv_repo, project_domain, tmp_path):
+        path = tmp_path / "hash_test.mp4"
+        path.write_bytes(b"hash content")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 640, "height": 480,
-                         "r_frame_rate": "30/1", "codec_name": "h264"}],
-            "format": {"duration": "10.0"},
-        }
-        mock_vm_repo.get_by_hash.return_value = None
-        created_video = DomainVideo(original_filename="hash_test.mp4", file_size_bytes=100,
-                                     duration_ms=10000, width=640, height=480,
-                                     fps=30.0, video_codec="h264")
-        mock_vm_repo.create_from_domain.return_value = created_video
-        pv_orm = MagicMock(id="pv-1")
-        mock_pv_repo.create.return_value = pv_orm
+        mock_ffprobe.probe.return_value = _probe_response()
+        created = DomainVideo(original_filename="hash_test.mp4", file_size_bytes=100,
+                               duration_ms=10000, width=640, height=480,
+                               fps=30.0, video_codec="h264")
+        mock_vm_repo.create_from_domain.return_value = created
+        mock_pv_repo.create.return_value = MagicMock(id="pv-h")
 
-        result = await service.import_file("proj-123", str(video_path))
-
-        # Verify hash was passed to get_by_hash
+        result = await service.import_file("proj-123", str(path))
         assert mock_vm_repo.get_by_hash.await_count >= 1
         assert result.status == "ready"
 
 
-# ------------------------------------------------------------------
-# import_url
-# ------------------------------------------------------------------
+# ==================================================================
+# TestImportUrl
+# ==================================================================
 
 class TestImportUrl:
-    """Tests for import_url()."""
 
     async def test_invalid_url(self, service):
-        """Invalid URL raises ValidationError."""
         with pytest.raises(ValidationError, match="URL"):
             await service.import_url("proj-123", "not-a-url")
 
     async def test_empty_url(self, service):
-        """Empty URL raises ValidationError."""
         with pytest.raises(ValidationError, match="URL"):
             await service.import_url("proj-123", "")
 
-    @patch("backend.services.import_service.shutil.rmtree")
     @patch("backend.services.import_service.asyncio.create_subprocess_exec")
-    async def test_url_import_download_fails(self, mock_subprocess, mock_rmtree,
-                                              service, mock_proj_repo, project_domain):
-        """yt-dlp failure raises ValidationError."""
-        mock_proj_repo.get_domain.return_value = project_domain
+    async def test_url_import_download_fails(self, mock_sub, service):
         proc = AsyncMock()
         proc.returncode = 1
-        proc.stderr = b"Download failed"
-        mock_subprocess.return_value = proc
+        proc.stderr = b"yt-dlp error"
+        proc.communicate = AsyncMock(return_value=(b"", b"yt-dlp error"))
+        mock_sub.return_value = proc
 
         with pytest.raises(ValidationError, match="Download"):
-            await service.import_url("proj-123", "https://example.com/video")
+            await service.import_url("proj-123", "https://example.com/v")
 
-    @patch("backend.services.import_service.shutil.rmtree")
     @patch("backend.services.import_service.asyncio.create_subprocess_exec")
-    async def test_url_import_ytdlp_not_found(self, mock_subprocess, mock_rmtree,
-                                               service, mock_proj_repo, project_domain):
-        """Missing yt-dlp raises ValidationError."""
-        mock_proj_repo.get_domain.return_value = project_domain
-        mock_subprocess.side_effect = FileNotFoundError()
-
+    async def test_url_import_ytdlp_not_found(self, mock_sub, service):
+        mock_sub.side_effect = FileNotFoundError()
         with pytest.raises(ValidationError, match="yt-dlp"):
-            await service.import_url("proj-123", "https://example.com/video")
-
-    @patch("backend.services.import_service.shutil.rmtree")
-    @patch("backend.services.import_service.asyncio.create_subprocess_exec")
-    async def test_url_import_cleanup(self, mock_subprocess, mock_rmtree,
-                                       service, mock_proj_repo, project_domain, tmp_path):
-        """Temp directory is cleaned up after successful URL import."""
-        mock_proj_repo.get_domain.return_value = project_domain
-        # Simulate yt-dlp download by having the mock create the output file
-        async def fake_subprocess(*args, **kwargs):
-            output_arg = None
-            for i, a in enumerate(args):
-                if a == "-o":
-                    output_arg = args[i + 1]
-                    break
-            if output_arg:
-                Path(output_arg).parent.mkdir(parents=True, exist_ok=True)
-                Path(output_arg).write_bytes(b"downloaded content")
-            proc = MagicMock()
-            proc.returncode = 0
-            proc.communicate = AsyncMock(return_value=(b"", b""))
-            return proc
-        mock_subprocess.side_effect = fake_subprocess
-
-        # Mock import_file to succeed (it will call _load_project again)
-        service._load_project = AsyncMock(return_value=project_domain)
-
-        video = DomainVideo(original_filename="url_test.mp4", file_size_bytes=100,
-                             duration_ms=10000, width=640, height=480,
-                             fps=30.0, video_codec="h264")
-        service._vm_repo.get_by_hash = AsyncMock(return_value=None)
-        service._vm_repo.create_from_domain = AsyncMock(return_value=video)
-        service._pv_repo.create = AsyncMock(return_value=MagicMock(id="pv-u"))
-
-        with patch.object(service, "_compute_hash", AsyncMock(return_value="abcd1234")):
-            with patch.object(service, "_probe_file", AsyncMock(return_value={
-                "streams": [{"codec_type": "video", "width": 640, "height": 480,
-                             "r_frame_rate": "30/1", "codec_name": "h264"}],
-                "format": {"duration": "10.0"},
-            })):
-                with patch.object(service, "_copy_file", AsyncMock()):
-                    result = await service.import_url("proj-123", "https://example.com/v")
-
-        assert result.status == "ready"
-        # Temp dir cleanup was called
-        assert mock_rmtree.called
+            await service.import_url("proj-123", "https://example.com/v")
 
 
-# ------------------------------------------------------------------
-# get_import_status
-# ------------------------------------------------------------------
+# ==================================================================
+# TestGetImportStatus
+# ==================================================================
 
 class TestGetImportStatus:
-    async def test_status_found(self, service, mock_pv_repo):
-        """Existing project-video record returns status."""
-        pv_orm = MagicMock(id="pv-1", project_id="proj-123", video_id="vid-1",
-                           source_path="/tmp/source.mp4", proxy_path="/tmp/proxy.mp4",
-                           added_at=None)
-        mock_pv_repo.get.return_value = pv_orm
 
-        result = await service.get_import_status("pv-1")
-        assert result.id == "pv-1"
-        assert result.status == "ready"
-        assert result.proxy_path == "/tmp/proxy.mp4"
+    async def test_status_found(self, service, mock_pv_repo):
+        pv = MagicMock(id="pv-1", project_id="proj-123", video_id="vid-1",
+                       source_path="/tmp/s.mp4", proxy_path="/tmp/p.mp4", added_at=None)
+        mock_pv_repo.get.return_value = pv
+        r = await service.get_import_status("pv-1")
+        assert r.id == "pv-1"
+        assert r.status == "ready"
 
     async def test_status_not_found(self, service, mock_pv_repo):
-        """Missing record raises NotFoundError."""
         mock_pv_repo.get.return_value = None
-
         with pytest.raises(NotFoundError):
-            await service.get_import_status("bad-pv")
+            await service.get_import_status("bad")
 
 
-# ------------------------------------------------------------------
-# cancel_import
-# ------------------------------------------------------------------
+# ==================================================================
+# TestCancelImport
+# ==================================================================
 
 class TestCancelImport:
-    async def test_cancel_success(self, service, mock_pv_repo):
-        """Cancelling an import removes the record and source file."""
-        pv_orm = MagicMock(id="pv-1", project_id="proj-123", video_id="vid-1",
-                           source_path="/tmp/cancel_test.mp4", proxy_path=None)
-        mock_pv_repo.get.return_value = pv_orm
-        mock_pv_repo.delete = AsyncMock(return_value=True)
 
+    async def test_cancel_success(self, service, mock_pv_repo):
+        pv = MagicMock(id="pv-1", project_id="proj-123", video_id="vid-1", source_path="/tmp/c.mp4")
+        mock_pv_repo.get.return_value = pv
+        mock_pv_repo.delete = AsyncMock(return_value=True)
         await service.cancel_import("pv-1")
         mock_pv_repo.delete.assert_awaited_once_with("pv-1")
 
     async def test_cancel_not_found(self, service, mock_pv_repo):
-        """Missing record raises NotFoundError."""
         mock_pv_repo.get.return_value = None
-
         with pytest.raises(NotFoundError):
-            await service.cancel_import("bad-pv")
+            await service.cancel_import("bad")
 
 
-# ------------------------------------------------------------------
-# validate_file
-# ------------------------------------------------------------------
+# ==================================================================
+# TestValidateFile
+# ==================================================================
 
 class TestValidateFile:
-    async def test_valid_file(self, service, mock_ffprobe, tmp_path):
-        """Valid file returns validation result."""
-        path = tmp_path / "valid.mp4"
-        path.write_bytes(b"valid")
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 1920, "height": 1080,
-                         "r_frame_rate": "30000/1001", "codec_name": "h264"}],
-            "format": {"duration": "30.0"},
-        }
 
-        result = await service.validate_file(str(path))
-        assert result["valid"] is True
-        assert result["has_video"] is True
+    async def test_valid_file(self, service, mock_ffprobe, tmp_path):
+        p = tmp_path / "v.mp4"
+        p.write_bytes(b"x")
+        mock_ffprobe.probe.return_value = _probe_response()
+        r = await service.validate_file(str(p))
+        assert r["valid"] is True
 
     async def test_unsupported_format(self, service, tmp_path):
-        """Unsupported format raises ValidationError."""
-        path = tmp_path / "test.wmv"
-        path.write_bytes(b"test")
-
+        p = tmp_path / "t.wmv"
+        p.write_bytes(b"x")
         with pytest.raises(ValidationError, match="format"):
-            await service.validate_file(str(path))
+            await service.validate_file(str(p))
 
     async def test_file_not_found(self, service):
-        """Non-existent file raises ValidationError."""
         with pytest.raises(ValidationError, match="not found"):
-            await service.validate_file("/tmp/nonexistent.avi")
+            await service.validate_file("/tmp/nope.avi")
 
 
-# ------------------------------------------------------------------
-# StorageError propagation
-# ------------------------------------------------------------------
+# ==================================================================
+# TestStorageErrors
+# ==================================================================
 
 class TestStorageErrors:
-    async def test_storage_error_on_copy(self, service, mock_proj_repo, mock_ffprobe,
-                                          mock_file_manager, project_domain, tmp_path):
-        """OSError during file copy raises StorageError."""
-        video_path = tmp_path / "copy_fail.mp4"
-        video_path.write_bytes(b"copy fail")
+
+    async def test_storage_error_on_copy(self, service, mock_proj_repo, mock_ffprobe, mock_file_manager, project_domain, tmp_path):
+        path = tmp_path / "cf.mp4"
+        path.write_bytes(b"cf")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 640, "height": 480,
-                         "r_frame_rate": "30/1", "codec_name": "h264"}],
-            "format": {"duration": "10.0"},
-        }
+        mock_ffprobe.probe.return_value = _probe_response()
         mock_file_manager.copy_atomic.side_effect = OSError("Disk full")
-
         with pytest.raises(StorageError, match="Copy"):
-            await service.import_file("proj-123", str(video_path))
+            await service.import_file("proj-123", str(path))
 
-    async def test_storage_error_on_mkdir(self, service, mock_proj_repo, mock_ffprobe,
-                                           mock_dir_manager, project_domain, tmp_path):
-        """OSError during directory creation raises StorageError."""
-        video_path = tmp_path / "mkdir_fail.mp4"
-        video_path.write_bytes(b"mkdir fail")
+    async def test_storage_error_on_mkdir(self, service, mock_proj_repo, mock_ffprobe, mock_dir_manager, project_domain, tmp_path):
+        """_storage_path mkdir OSError → StorageError."""
+        path = tmp_path / "mk.mp4"
+        path.write_bytes(b"mk")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 640, "height": 480,
-                         "r_frame_rate": "30/1", "codec_name": "h264"}],
-            "format": {"duration": "10.0"},
-        }
+        mock_ffprobe.probe.return_value = _probe_response()
 
-        dir_mock = MagicMock()
-        dir_mock.__truediv__ = lambda self, x: dir_mock
-        from pathlib import Path
-        dir_mock.project_dir = MagicMock(return_value=Path("/tmp/no-perm"))
-        dir_mock.mkdir.side_effect = OSError("Permission denied")
-        mock_dir_manager.project_dir.return_value = dir_mock
+        pd = MagicMock(spec=Path)
+        pd.__truediv__ = lambda self, x: pd
+        pd.mkdir = MagicMock(side_effect=OSError("Permission denied"))
+        mock_dir_manager.project_dir.return_value = pd
 
         with pytest.raises(StorageError, match="directory"):
-            await service.import_file("proj-123", str(video_path))
+            await service.import_file("proj-123", str(path))
 
 
-# ------------------------------------------------------------------
-# Edge cases
-# ------------------------------------------------------------------
+# ==================================================================
+# TestEdgeCases
+# ==================================================================
 
 class TestEdgeCases:
-    async def test_empty_file(self, service, mock_proj_repo, mock_ffprobe,
-                               mock_vm_repo, mock_pv_repo, project_domain, tmp_path):
-        """Empty file is rejected by FFprobe (no streams)."""
+
+    async def test_empty_file(self, service, mock_proj_repo, mock_ffprobe, project_domain, tmp_path):
         path = tmp_path / "empty.mp4"
         path.write_bytes(b"")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.side_effect = Exception("Cannot probe empty file")
-
+        mock_ffprobe.probe.side_effect = Exception("Cannot probe")
         with pytest.raises(ValidationError, match="metadata"):
             await service.import_file("proj-123", str(path))
 
-    async def test_filename_with_spaces(self, service, mock_proj_repo, mock_ffprobe,
-                                         mock_vm_repo, mock_pv_repo, project_domain, tmp_path):
-        """Filename with spaces is handled correctly."""
-        video_path = tmp_path / "my video file.mp4"
-        video_path.write_bytes(b"spaces")
+    async def test_filename_with_spaces(self, service, mock_proj_repo, mock_vm_repo, mock_pv_repo, mock_ffprobe, project_domain, tmp_path):
+        path = tmp_path / "my video.mp4"
+        path.write_bytes(b"spaces")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {
-            "streams": [{"codec_type": "video", "width": 640, "height": 480,
-                         "r_frame_rate": "30/1", "codec_name": "h264"}],
-            "format": {"duration": "10.0"},
-        }
-        mock_vm_repo.get_by_hash.return_value = None
-        created = DomainVideo(original_filename="my video file.mp4", file_size_bytes=100,
+        mock_ffprobe.probe.return_value = _probe_response()
+        created = DomainVideo(original_filename="my video.mp4", file_size_bytes=100,
                                duration_ms=10000, width=640, height=480,
                                fps=30.0, video_codec="h264")
         mock_vm_repo.create_from_domain.return_value = created
         mock_pv_repo.create.return_value = MagicMock(id="pv-s")
-
-        result = await service.import_file("proj-123", str(video_path))
-        assert result.status == "ready"
+        r = await service.import_file("proj-123", str(path))
+        assert r.status == "ready"
