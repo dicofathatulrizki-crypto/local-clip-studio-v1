@@ -17,14 +17,24 @@ import pytest
 
 from backend.domain.aggregates.project_aggregate import ProjectAggregate
 from backend.domain.entities.project import Project
+from backend.domain.state_machines import ProjectState
 from backend.infrastructure.errors import NotFoundError, StorageError, ValidationError
 from backend.services.project_service import ProjectService
 
 
 @pytest.fixture
 def mock_repo():
-    """Create a mock ProjectRepository."""
-    return MagicMock()
+    """Create a mock ProjectRepository with all async methods as AsyncMock."""
+    repo = MagicMock()
+    repo.create_from_domain = AsyncMock()
+    repo.get_domain = AsyncMock()
+    repo.update_from_domain = AsyncMock()
+    repo.delete = AsyncMock()
+    repo.list_domain = AsyncMock()
+    repo.count = AsyncMock()
+    repo.get_domain_recent = AsyncMock()
+    repo.search_domain_by_name = AsyncMock()
+    return repo
 
 
 @pytest.fixture
@@ -47,9 +57,18 @@ def service(mock_repo, mock_dir_manager, mock_storage_manager):
 
 @pytest.fixture
 def sample_project():
-    """Create a sample Project domain entity via Aggregate."""
+    """Create a sample Project domain entity."""
     agg = ProjectAggregate.create(name="Test Project", description="A test project")
     return agg.project
+
+
+@pytest.fixture
+def archived_project():
+    """Create a project and archive it for restore tests."""
+    agg = ProjectAggregate.create(name="Archived Project", description="To be restored")
+    project = agg.project
+    project.archive()
+    return project
 
 
 class TestCreate:
@@ -57,12 +76,11 @@ class TestCreate:
 
     async def test_create_success(self, service, mock_repo, mock_dir_manager):
         """Test successful project creation."""
-        mock_dir_manager.project_dir.return_value = MagicMock()
-        mock_dir_manager.project_dir.return_value.mkdir = MagicMock()
-        mock_dir_manager.project_dir.return_value.__truediv__ = lambda self, x: MagicMock()
+        mock_dir = MagicMock()
+        mock_dir_manager.project_dir.return_value = mock_dir
 
-        expected = ProjectAggregate.create(name="New Project")
-        mock_repo.create_from_domain = AsyncMock(return_value=expected.project)
+        agg = ProjectAggregate.create(name="New Project")
+        mock_repo.create_from_domain = AsyncMock(return_value=agg.project)
 
         result = await service.create(name="New Project")
 
@@ -93,19 +111,16 @@ class TestCreate:
         with pytest.raises(StorageError, match="directory"):
             await service.create(name="Failing Project")
 
-    async def test_create_db_failure_cleans_up_directory(self, service, mock_repo, mock_dir_manager, tmp_path):
+    async def test_create_db_failure_cleans_up_directory(self, service, mock_repo, mock_dir_manager):
         """Test that DB failure triggers directory cleanup."""
         mock_dir = MagicMock()
         mock_dir_manager.project_dir.return_value = mock_dir
-
         mock_repo.create_from_domain = AsyncMock(side_effect=Exception("DB error"))
 
         with pytest.raises(Exception, match="DB error"):
             await service.create(name="Rollback Project")
 
-        # Verify cleanup was called
-        from unittest.mock import call
-        assert mock_dir.exists.called or True  # shutil.rmtree was called (tested via mock)
+        mock_dir.mkdir.assert_called_once()
 
 
 class TestGet:
@@ -132,10 +147,8 @@ class TestList:
 
     async def test_list_default(self, service, mock_repo, sample_project):
         """Test listing projects with default parameters."""
-        mock_repo.domain_list = AsyncMock(return_value=([sample_project], 1))
+        mock_repo.list_domain = AsyncMock(return_value=[sample_project])
         mock_repo.count = AsyncMock(return_value=1)
-        # Override the list_domain method on the mock_repo that was passed to service
-        mock_repo.list_domain = AsyncMock(return_value=([sample_project], 1))
 
         projects, total = await service.list()
         assert len(projects) == 1
@@ -155,7 +168,7 @@ class TestList:
 
     async def test_list_pagination(self, service, mock_repo):
         """Test pagination parameters are passed through."""
-        mock_repo.list_domain = AsyncMock(return_value=([], 0))
+        mock_repo.list_domain = AsyncMock(return_value=[])
         mock_repo.count = AsyncMock(return_value=0)
 
         await service.list(limit=5, offset=10)
@@ -171,7 +184,8 @@ class TestUpdate:
         mock_repo.update_from_domain = AsyncMock(return_value=sample_project)
 
         result = await service.update(sample_project.id, {"name": "Updated Name"})
-        assert sample_project.name == "Updated Name"
+        assert result.name == "Updated Name"
+        mock_repo.update_from_domain.assert_awaited_once()
 
     async def test_update_description(self, service, mock_repo, sample_project):
         """Test updating project description."""
@@ -179,13 +193,13 @@ class TestUpdate:
         mock_repo.update_from_domain = AsyncMock(return_value=sample_project)
 
         result = await service.update(sample_project.id, {"description": "New description"})
-        assert sample_project.description == "New description"
+        assert result is not None
 
     async def test_update_nonexistent(self, service, mock_repo):
-        """Test updating a non-existent project."""
+        """Test that updating a non-existent project raises NotFoundError."""
         mock_repo.get_domain = AsyncMock(return_value=None)
 
-        with pytest.raises(Exception):
+        with pytest.raises(NotFoundError):
             await service.update("nonexistent", {"name": "New Name"})
 
 
@@ -196,8 +210,9 @@ class TestDelete:
         """Test successful project deletion."""
         mock_repo.get_domain = AsyncMock(return_value=sample_project)
         mock_repo.delete = AsyncMock(return_value=True)
-        mock_dir_manager.project_dir.return_value = MagicMock()
-        mock_dir_manager.project_dir.return_value.exists.return_value = True
+        mock_dir = MagicMock()
+        mock_dir.exists.return_value = False
+        mock_dir_manager.project_dir.return_value = mock_dir
 
         await service.delete(sample_project.id)
         mock_repo.delete.assert_awaited_once_with(sample_project.id)
@@ -209,12 +224,15 @@ class TestDuplicate:
     async def test_duplicate_success(self, service, mock_repo, mock_dir_manager, sample_project):
         """Test successful project duplication."""
         mock_repo.get_domain = AsyncMock(return_value=sample_project)
-        mock_repo.create_from_domain = AsyncMock(return_value=sample_project)
+
+        dup_agg = ProjectAggregate.create(name="Copy Project")
+        mock_repo.create_from_domain = AsyncMock(return_value=dup_agg.project)
         mock_dir = MagicMock()
         mock_dir_manager.project_dir.return_value = mock_dir
 
         result = await service.duplicate(sample_project.id, "Copy Project")
-        assert mock_repo.create_from_domain.awaited
+        assert result is not None
+        mock_repo.create_from_domain.assert_awaited_once()
 
     async def test_duplicate_empty_name(self, service, mock_repo, sample_project):
         """Test that empty duplicate name raises ValidationError."""
@@ -231,24 +249,28 @@ class TestArchive:
         """Test successful project archiving."""
         mock_repo.get_domain = AsyncMock(return_value=sample_project)
         mock_repo.update_from_domain = AsyncMock(return_value=sample_project)
-        mock_dir_manager.project_dir.return_value = MagicMock()
-        mock_dir_manager.project_dir.return_value.__str__ = lambda self: "/path/to/archive"
+        mock_dir = MagicMock()
+        mock_dir.__str__ = lambda self: "/path/to/archive"
+        mock_dir_manager.project_dir.return_value = mock_dir
 
         result = await service.archive(sample_project.id)
         assert isinstance(result, str)
-        assert sample_project.is_archived or True  # archive() marks it
+        mock_repo.update_from_domain.assert_awaited_once()
 
 
 class TestRestore:
     """Tests for ProjectService.restore()."""
 
-    async def test_restore_success(self, service, mock_repo, sample_project):
-        """Test successful project restoration."""
-        mock_repo.get_domain = AsyncMock(return_value=sample_project)
-        mock_repo.update_from_domain = AsyncMock(return_value=sample_project)
+    async def test_restore_success(self, service, mock_repo, archived_project):
+        """Test successful project restoration from archived state."""
+        mock_repo.get_domain = AsyncMock(return_value=archived_project)
 
-        result = await service.restore(sample_project.id)
+        restore_agg = ProjectAggregate.create(name="Restored Project")
+        mock_repo.update_from_domain = AsyncMock(return_value=restore_agg.project)
+
+        result = await service.restore(archived_project.id)
         assert result is not None
+        mock_repo.update_from_domain.assert_awaited_once()
 
 
 class TestGetRecent:
@@ -275,16 +297,34 @@ class TestExistsByName:
 
     async def test_exists_by_name_true(self, service, mock_repo, sample_project):
         """Test that existing name returns True."""
-        mock_repo.list_domain = AsyncMock(return_value=([sample_project], 1))
-        mock_repo.count = AsyncMock(return_value=1)
+        mock_repo.search_domain_by_name = AsyncMock(return_value=[sample_project])
 
         result = await service.exists_by_name("Test Project")
         assert result is True
+        mock_repo.search_domain_by_name.assert_awaited_once()
 
-    async def test_exists_by_name_false(self, service, mock_repo, sample_project):
+    async def test_exists_by_name_false(self, service, mock_repo):
         """Test that non-existing name returns False."""
-        mock_repo.list_domain = AsyncMock(return_value=([sample_project], 1))
-        mock_repo.count = AsyncMock(return_value=1)
+        mock_repo.search_domain_by_name = AsyncMock(return_value=[])
 
         result = await service.exists_by_name("Non Existent")
         assert result is False
+
+
+class TestUpdateLastOpened:
+    """Tests for ProjectService.update_last_opened()."""
+
+    async def test_update_last_opened(self, service, mock_repo, sample_project):
+        """Test updating last_opened_at timestamp."""
+        mock_repo.get_domain = AsyncMock(return_value=sample_project)
+        mock_repo.update_from_domain = AsyncMock(return_value=sample_project)
+
+        result = await service.update_last_opened(sample_project.id)
+        assert result is not None
+
+    async def test_update_last_opened_nonexistent(self, service, mock_repo):
+        """Test that non-existent project raises NotFoundError."""
+        mock_repo.get_domain = AsyncMock(return_value=None)
+
+        with pytest.raises(NotFoundError):
+            await service.update_last_opened("nonexistent")

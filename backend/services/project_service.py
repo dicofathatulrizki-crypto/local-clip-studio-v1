@@ -223,6 +223,11 @@ class ProjectService:
             ValidationError: If update values are invalid.
         """
         project = await self.get(project_id)
+        if project is None:
+            raise NotFoundError(
+                message=f"Project not found: {project_id}",
+                details={"project_id": project_id},
+            )
 
         if "name" in updates:
             new_name = (updates["name"] or "").strip()
