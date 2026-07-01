@@ -19,13 +19,11 @@ from backend.domain.aggregates.project_aggregate import ProjectAggregate
 from backend.domain.entities.project import Project
 from backend.domain.events import ProjectCreated, ProjectDeleted
 from backend.domain.exceptions import (
-    EntityNotFoundError,
     InvalidOperationError,
     InvalidProjectStateError,
 )
 from backend.infrastructure.database.repositories.project_repo import ProjectRepository
 from backend.infrastructure.errors import (
-    AppError,
     NotFoundError,
     StorageError,
     ValidationError,
@@ -144,25 +142,16 @@ class ProjectService:
 
         return created
 
-    async def get(self, project_id: str) -> Project:
+    async def get(self, project_id: str) -> Project | None:
         """Get a project by its ID.
 
         Args:
             project_id: UUID of the project.
 
         Returns:
-            The Project domain entity.
-
-        Raises:
-            NotFoundError: If the project does not exist.
+            The Project domain entity, or None if not found.
         """
-        project = await self._repo.get_domain(project_id)
-        if project is None:
-            raise NotFoundError(
-                message=f"Project not found: {project_id}",
-                details={"project_id": project_id},
-            )
-        return project
+        return await self._repo.get_domain(project_id)
 
     async def list(
         self,
@@ -197,13 +186,19 @@ class ProjectService:
                 details={"field": "offset", "value": offset},
             )
 
+        # Map sort parameter to repository order_by
+        order_by: str | None = None
+        if sort and sort != "-last_opened_at":
+            order_by = sort
+        elif sort == "-last_opened_at":
+            order_by = "-last_opened_at"
+
         projects = await self._repo.list_domain(
             limit=limit,
             offset=offset,
-            sort=sort,
-            include_archived=include_archived,
+            order_by=order_by,
         )
-        total = await self._repo.count(include_archived=include_archived)
+        total = await self._repo.count()
         return projects, total
 
     async def update(self, project_id: str, updates: dict[str, Any]) -> Project:
@@ -244,10 +239,9 @@ class ProjectService:
                     message="Description must be 2000 characters or fewer",
                     details={"field": "description", "max_length": 2000},
                 )
-            object.__setattr__(project, "description", desc)
+            project.update_description(desc)
 
-        object.__setattr__(project, "updated_at", datetime.now(timezone.utc))
-        updated = await self._repo.update_from_domain(project)
+        project = await self._repo.update_from_domain(project)
 
         logger.info(
             "Project updated",
@@ -413,14 +407,14 @@ class ProjectService:
 
         return created
 
-    async def archive(self, project_id: str) -> Project:
+    async def archive(self, project_id: str) -> str:
         """Archive a project (soft delete — can be restored).
 
         Args:
             project_id: UUID of the project.
 
         Returns:
-            The archived Project domain entity.
+            The archive path string.
 
         Raises:
             NotFoundError: If the project does not exist.
@@ -437,8 +431,8 @@ class ProjectService:
                 details={"project_id": project_id, "state": str(project.state)},
             )
 
-        object.__setattr__(project, "updated_at", datetime.now(timezone.utc))
         updated = await self._repo.update_from_domain(project)
+        project_dir = self._dir_manager.project_dir(project_id)
 
         logger.info(
             "Project archived",
@@ -451,13 +445,13 @@ class ProjectService:
             },
         )
 
-        return updated
+        return str(project_dir)
 
     async def restore(self, project_id: str) -> Project:
         """Restore an archived project.
 
         Args:
-            project_id: UUID of the project.
+            project_id: UUID of the project to restore.
 
         Returns:
             The restored Project domain entity.
@@ -467,6 +461,11 @@ class ProjectService:
             InvalidOperationError: If the project cannot be restored.
         """
         project = await self.get(project_id)
+        if project is None:
+            raise NotFoundError(
+                message=f"Project not found: {project_id}",
+                details={"project_id": project_id},
+            )
 
         try:
             project.restore()
@@ -477,7 +476,6 @@ class ProjectService:
                 details={"project_id": project_id, "state": str(project.state)},
             )
 
-        object.__setattr__(project, "updated_at", datetime.now(timezone.utc))
         updated = await self._repo.update_from_domain(project)
 
         logger.info(
@@ -506,9 +504,12 @@ class ProjectService:
             NotFoundError: If the project does not exist.
         """
         project = await self.get(project_id)
-        now = datetime.now(timezone.utc)
-        object.__setattr__(project, "last_opened_at", now)
-        object.__setattr__(project, "updated_at", now)
+        if project is None:
+            raise NotFoundError(
+                message=f"Project not found: {project_id}",
+                details={"project_id": project_id},
+            )
+        project.record_open()
         updated = await self._repo.update_from_domain(project)
         return updated
 
