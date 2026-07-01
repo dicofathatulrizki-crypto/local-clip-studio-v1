@@ -338,7 +338,13 @@ class ImportService:
     def _storage_path(self, project: Project, file_hash: str, ext: str) -> Path:
         pd = self._dir_manager.project_dir(project.id)
         sd = pd / "sources"
-        sd.mkdir(parents=True, exist_ok=True)
+        try:
+            sd.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise StorageError(
+                message=f"Failed to create storage directory: {exc}",
+                details={"path": str(sd)},
+            )
         return sd / f"{file_hash[:16]}{ext}"
 
     async def _copy_file(self, src: Path, dst: Path) -> None:
