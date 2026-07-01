@@ -1,74 +1,24 @@
-"""
-Shared pytest fixtures for Local Clip Studio tests.
+"""Shared test fixtures and configuration."""
 
-Provides fixtures for:
-- Isolated temporary directories
-- Test configuration / settings
-- Logging setup
-- File system paths
-"""
 from __future__ import annotations
 
-import os
-import tempfile
-from collections.abc import AsyncGenerator, Generator
-from pathlib import Path
-
 import pytest
-import pytest_asyncio
-
-from backend.config.settings import Settings, reload_settings
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _configure_test_environment() -> Generator[None, None, None]:
-    """Configure the test environment before any tests run.
+@pytest.fixture(autouse=True)
+def reset_settings():
+    """Reset settings singleton before each test."""
+    from backend.config.settings import Settings
 
-    Sets up:
-    - A temporary storage location
-    - Disables GPU detection (tests don't need GPU)
-    - Sets log level to DEBUG for test observability
-    """
-    with tempfile.TemporaryDirectory(prefix="localclip_test_") as tmpdir:
-        old_home = os.environ.get("HOME")
-        # Redirect home to temp directory for tests
-        os.environ["HOME"] = tmpdir
-        os.environ["LOCALCLIP_LOG_LEVEL"] = "DEBUG"
-        os.environ["LOCALCLIP_GPU_BACKEND"] = "cpu"
-
-        # Ensure test directories exist
-        config_dir = Path(tmpdir) / ".localclip" / "config"
-        config_dir.mkdir(parents=True, exist_ok=True)
-
-        yield
-
-        # Restore environment
-        if old_home:
-            os.environ["HOME"] = old_home
-        else:
-            del os.environ["HOME"]
+    Settings.reset_instance()
+    yield
+    Settings.reset_instance()
 
 
 @pytest.fixture
-def test_settings() -> Settings:
-    """Provide a fresh Settings instance for each test."""
-    return reload_settings()
+def test_settings():
+    """Create test settings with default values."""
+    from backend.config.settings import Settings
 
-
-@pytest.fixture
-def temp_dir() -> Generator[Path, None, None]:
-    """Provide a temporary directory for isolated file operations."""
-    with tempfile.TemporaryDirectory(prefix="localclip_test_") as tmpdir:
-        yield Path(tmpdir)
-
-
-@pytest.fixture
-def test_data_dir() -> Path:
-    """Return the path to test fixture data."""
-    return Path(__file__).parent / "fixtures"
-
-
-@pytest_asyncio.fixture
-async def async_settings() -> AsyncGenerator[Settings, None]:
-    """Provide settings for async tests."""
-    yield reload_settings()
+    settings = Settings(environment="testing")
+    return settings

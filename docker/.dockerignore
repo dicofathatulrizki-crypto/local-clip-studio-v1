@@ -1,59 +1,13 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-*.egg
-.venv/
-venv/
-env/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Environment
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.git
+.gitignore
 .env
-.env.local
-*.key
-*.pem
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Project
-~/.localclip/
-localclip_data/
-
-# Logs
-*.log
-/logs/
-
-# Database
-*.db
-*.sqlite
-/alembic/versions/*.pyc
-
-# AI Models
-/models/**
-
-# Temp
-/temp/
-/tmp/
-
-# Test artifacts
-.htmlcov/
-.coverage
-coverage/
-coverage.xml
-.pytest_cache/
-test-results/
-
-# Node/Frontend
-node_modules/
+venv
+.venv
+tests/
+docs/
+scripts/
 frontend/

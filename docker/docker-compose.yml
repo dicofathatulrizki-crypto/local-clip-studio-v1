@@ -3,48 +3,14 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      target: base
     ports:
       - "8765:8765"
     volumes:
       - localclip_data:/home/user/.localclip
-      - ./models:/home/user/.localclip/models
     environment:
-      - LOCALCLIP_API_HOST=0.0.0.0
-      - LOCALCLIP_API_PORT=8765
-      - LOCALCLIP_LOG_LEVEL=INFO
-      - LOCALCLIP_STORAGE_PATH=/home/user/.localclip
+      - LOCALCLIP_STORAGE__BASE_PATH=/home/user/.localclip
+      - LOCALCLIP_GPU__BACKEND=cpu
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Optional: GPU-enabled worker
-  worker:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      target: base
-    command: celery -A backend.infrastructure.queue.celery_app worker --loglevel=info
-    volumes:
-      - localclip_data:/home/user/.localclip
-      - ./models:/home/user/.localclip/models
-    environment:
-      - LOCALCLIP_STORAGE_PATH=/home/user/.localclip
-      - LOCALCLIP_GPU_BACKEND=cpu
-      - CELERY_BROKER_URL=filesystem://
-    depends_on:
-      - backend
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
 volumes:
   localclip_data:
