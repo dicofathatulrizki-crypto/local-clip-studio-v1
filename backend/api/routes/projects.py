@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -28,21 +27,28 @@ class ProjectUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
 
+class DuplicateProjectRequest(BaseModel):
+    new_name: str = Field(..., min_length=1, max_length=255)
+
 class ProjectResponse(BaseModel):
     id: str
     name: str
-    description: str | None
+    description: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     last_opened_at: datetime | None = None
     is_archived: bool = False
-    video_count: int = 0
 
 class ProjectListResponse(BaseModel):
     items: list[ProjectResponse]
     total: int
     limit: int
     offset: int
+
+class ArchiveResponse(BaseModel):
+    path: str
+    project_id: str
+    archived: bool = True
 
 
 # ── Dependencies ────────────────────────────────────────────
@@ -55,7 +61,7 @@ def _get_service(session=Depends(get_db_session)) -> ProjectService:
     )
 
 
-# ── Routes ─────────────────────────────────────────────────
+# ── Routes (static paths BEFORE parameterized paths) ────────
 
 @router.post("", response_model=ProjectResponse, status_code=201)
 async def create_project(body: ProjectCreate, svc: ProjectService = Depends(_get_service)):
@@ -70,6 +76,15 @@ async def list_projects(limit: int = 20, offset: int = 0,
     projects, total = await svc.list(limit=limit, offset=offset)
     items = [ProjectResponse(id=str(p.id), name=p.name, description=p.description) for p in projects]
     return ProjectListResponse(items=items, total=total, limit=limit, offset=offset)
+
+# ── Static paths ────────────────────────────────────────────
+
+@router.get("/recent", response_model=list[ProjectResponse])
+async def recent_projects(count: int = 10, svc: ProjectService = Depends(_get_service)):
+    projects = await svc.get_recent(count=count)
+    return [ProjectResponse(id=str(p.id), name=p.name, description=p.description) for p in projects]
+
+# ── Parameterized paths ─────────────────────────────────────
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: str, svc: ProjectService = Depends(_get_service)):
@@ -91,10 +106,10 @@ async def update_project(project_id: str, body: ProjectUpdate,
 async def delete_project(project_id: str, svc: ProjectService = Depends(_get_service)):
     await svc.delete(project_id)
 
-@router.post("/{project_id}/archive", response_model=ProjectResponse)
+@router.post("/{project_id}/archive", response_model=ArchiveResponse)
 async def archive_project(project_id: str, svc: ProjectService = Depends(_get_service)):
     path = await svc.archive(project_id)
-    return ProjectResponse(id=project_id, name="", description=f"Archived at: {path}")
+    return ArchiveResponse(path=path, project_id=project_id)
 
 @router.post("/{project_id}/restore", response_model=ProjectResponse)
 async def restore_project(project_id: str, svc: ProjectService = Depends(_get_service)):
@@ -102,12 +117,7 @@ async def restore_project(project_id: str, svc: ProjectService = Depends(_get_se
     return ProjectResponse(id=str(project.id), name=project.name, description=project.description)
 
 @router.post("/{project_id}/duplicate", response_model=ProjectResponse, status_code=201)
-async def duplicate_project(project_id: str, body: ProjectCreate,
+async def duplicate_project(project_id: str, body: DuplicateProjectRequest,
                              svc: ProjectService = Depends(_get_service)):
-    project = await svc.duplicate(project_id, body.name)
+    project = await svc.duplicate(project_id, body.new_name)
     return ProjectResponse(id=str(project.id), name=project.name, description=project.description)
-
-@router.get("/recent", response_model=list[ProjectResponse])
-async def recent_projects(count: int = 10, svc: ProjectService = Depends(_get_service)):
-    projects = await svc.get_recent(count=count)
-    return [ProjectResponse(id=str(p.id), name=p.name, description=p.description) for p in projects]
