@@ -56,8 +56,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 def _register_routes(app: FastAPI) -> None:
-    """Register API route modules (stubs for future modules)."""
-    pass
+    """Register API route modules."""
+    from backend.api.routes import (
+        projects_router,
+        settings_router,
+        system_router,
+        videos_router,
+    )
+
+    app.include_router(projects_router)
+    app.include_router(videos_router)
+    app.include_router(settings_router)
+    app.include_router(system_router)
 
 
 def run_server() -> None:
