@@ -39,6 +39,9 @@ def _create_app(settings: Settings) -> FastAPI:
     # Routes
     _register_routes(app)
 
+    # WebSocket
+    _register_websocket(app)
+
     # Exception handlers
     _register_exception_handlers(app)
 
@@ -150,7 +153,23 @@ def _register_routes(app: FastAPI) -> None:
     app.include_router(settings_router)
     app.include_router(system_router)
 
-    logger.info(f"Registered {4} route modules")
+    logger.info("Registered 4 route modules")
+
+
+# ── WebSocket ──────────────────────────────────────────────
+
+
+def _register_websocket(app: FastAPI) -> None:
+    """Register the WebSocket endpoint."""
+    from fastapi import WebSocket, WebSocketDisconnect
+    from backend.infrastructure.websocket.handlers import WebSocketHandler
+
+    @app.websocket("/api/v1/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        handler = WebSocketHandler(websocket)
+        await handler.run()
+
+    logger.info("WebSocket endpoint registered at /api/v1/ws")
 
 
 # ── Exception handlers ─────────────────────────────────────
