@@ -182,6 +182,21 @@ Every finding from the audit report was tested against the **current codebase** 
 
 ## Phase 3: Medium-Severity Items
 
+## Sprint 1 — Completed Issues
+
+### H1. Broken test imports (✅ Fixed)
+- **Status:** ✅ Fixed
+- **Files changed:**
+  - `backend/infrastructure/queue/retry.py` — Added `ExponentialBackoff` and `RetryState` classes; added backward-compat methods to `RetryManager` (`register_job`, `get_state`, `can_retry`, `record_retry`, `get_delay`, `remove_job`, `total_retries`); imported and re-exported `RetryPolicy` from `models`
+  - `tests/unit/queue/test_retry.py` — Updated `TestRetryPolicy` assertions to use current API field names (`base_delay_seconds`, `backoff_multiplier`)
+  - `tests/integration/queue/test_queue_integration.py` — Changed `RetryPolicy` import from `retry` to `models`
+- **Tests executed:** `tests/unit/queue/test_retry.py` — 21/21 passed ✅; `tests/integration/queue/test_queue_integration.py` — collects successfully (9 tests) ✅
+- **Regression status:** No regressions. Existing `RetryManager.should_retry()` API preserved. Pre-existing 14 queue failures unchanged (test_priority, test_progress, test_models, test_exceptions — separate issues)
+
+---
+
+## Sprint 2: Remaining Issues
+
 | ID | Finding | Status | Fix |
 |----|---------|--------|-----|
 | M1 | Unused `start` variables in cuda_provider.py:189, rocm_provider.py:179 (F841) | 🔴 Confirmed | Remove unused variables |

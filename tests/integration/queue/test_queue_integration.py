@@ -19,7 +19,8 @@ from backend.infrastructure.queue.dispatcher import (
 )
 from backend.infrastructure.queue.models import JobPriority, QueueItem, JobStatus
 from backend.infrastructure.queue.priority import PriorityQueue
-from backend.infrastructure.queue.retry import RetryManager, RetryPolicy
+from backend.infrastructure.queue.models import RetryPolicy
+from backend.infrastructure.queue.retry import RetryManager
 from backend.infrastructure.queue.scheduler import Scheduler
 from backend.infrastructure.queue.worker import Worker, WorkerPool
 

@@ -63,21 +63,21 @@ class TestRetryPolicy:
         """Fixed delay policy should always return the same delay."""
         policy = RetryPolicy.fixed(delay=5.0, max_retries=3)
         assert policy.max_retries == 3
-        assert policy.backoff.initial_delay == 5.0
-        assert policy.backoff.multiplier == 1.0
+        assert policy.base_delay_seconds == 5.0
+        assert policy.backoff_multiplier == 1.0
 
     def test_exponential_default(self) -> None:
         """Default exponential policy should have reasonable values."""
         policy = RetryPolicy.exponential()
         assert policy.max_retries == 3
-        assert policy.backoff.initial_delay == 1.0
-        assert policy.backoff.multiplier == 2.0
+        assert policy.base_delay_seconds == 1.0
+        assert policy.backoff_multiplier == 2.0
 
     def test_aggressive_retry(self) -> None:
         """Aggressive retry should retry fewer times with shorter delays."""
         policy = RetryPolicy.aggressive()
         assert policy.max_retries == 1
-        assert policy.backoff.initial_delay == 0.5
+        assert policy.base_delay_seconds == 0.5
 
     def test_no_retry(self) -> None:
         """No retry policy should have max_retries of 0."""
