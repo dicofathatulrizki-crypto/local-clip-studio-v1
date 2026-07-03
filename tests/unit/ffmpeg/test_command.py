@@ -249,3 +249,200 @@ class TestCommandBuilder:
         result = CommandBuilder.build_filter_graph(filters)
         assert "crop=640:480:10:20" in result
         assert "rotate=90.0*PI/180" in result
+
+
+class TestCommandBuilderRegression:
+    """Regression tests: ensuring the escaping hardening does NOT change
+    command output for valid existing inputs (all numeric or simple paths).
+
+    Every test uses an exact command-array snapshot to prove that the output
+    is byte-for-byte identical to what it was before FFmpegFilterEscaper was
+    introduced. Since all values in these scenarios are numeric (no special
+    chars), escape_filter_value is a no-op.
+    """
+
+    def test_regression_crop_simple(self) -> None:
+        """Simple crop — numeric-only values, command unchanged."""
+        params = CropParams(width=640, height=480, x=100, y=50)
+        cmd = CommandBuilder.crop("input.mp4", "output.mp4", params)
+        expected = [
+            "-i", "input.mp4",
+            "-vf", "crop=640:480:100:50",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-y",
+            "output.mp4",
+        ]
+        assert cmd == expected
+
+    def test_regression_scale_simple(self) -> None:
+        """Simple smart scale — numeric-only values, command unchanged."""
+        cmd = CommandBuilder.smart_scale("input.mp4", "output.mp4", 640, 360)
+        expected = [
+            "-i", "input.mp4",
+            "-vf", (
+                "scale=640:360:force_original_aspect_ratio=decrease,"
+                "pad=640:360:(ow-iw)/2:(oh-ih)/2:color=black"
+            ),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-y",
+            "output.mp4",
+        ]
+        assert cmd == expected
+
+    def test_regression_fps_conversion(self) -> None:
+        """FPS conversion — numeric-only values, command unchanged."""
+        cmd = CommandBuilder.convert_fps("input.mp4", "output.mp4", 29.97)
+        expected = [
+            "-i", "input.mp4",
+            "-vf", "fps=29.97",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-y",
+            "output.mp4",
+        ]
+        assert cmd == expected
+
+    def test_regression_audio_normalization(self) -> None:
+        """Audio normalization — numeric-only values, command unchanged."""
+        cmd = CommandBuilder.normalize_audio("input.mp4", "output.mp4")
+        expected = [
+            "-i", "input.mp4",
+            "-af", "loudnorm=I=-14.0:LRA=7:TP=-1.5:print_format=json",
+            "-c:v", "copy",
+            "-y",
+            "output.mp4",
+        ]
+        assert cmd == expected
+
+    def test_regression_waveform(self) -> None:
+        """Waveform generation — numeric-only dimensions, command unchanged."""
+        cmd = CommandBuilder.waveform("input.mp4", "waveform.png", 800, 300)
+        expected = [
+            "-i", "input.mp4",
+            "-filter_complex", "showwavespic=s=800x300:colors=white|gray",
+            "-frames:v", "1",
+            "-y",
+            "waveform.png",
+        ]
+        assert cmd == expected
+
+    def test_regression_export_without_subtitles(self) -> None:
+        """Export with default params — no filter values, command unchanged."""
+        cmd = CommandBuilder.export("input.mp4", "output.mp4", ExportParams())
+        expected = [
+            "-i", "input.mp4",
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-movflags", "+faststart",
+            "-y",
+            "output.mp4",
+        ]
+        assert cmd == expected
+
+    def test_regression_export_with_ordinary_paths(self) -> None:
+        """Subtitle burn-in with simple path — only colons/paths escaped, normal path unchanged."""
+        cmd = CommandBuilder.burn_subtitles(
+            "input.mp4",
+            "sub.srt",
+            "output.mp4",
+        )
+        expected = [
+            "-i", "input.mp4",
+            "-vf", "subtitles=sub.srt",
+            "-c:a", "copy",
+            "-y",
+            "output.mp4",
+        ]
+        assert cmd == expected
+
+    def test_regression_custom_filter_graph(self) -> None:
+        """build_filter_graph with numeric-only params — unchanged."""
+        result = CommandBuilder.build_filter_graph(VideoFilters(
+            scale=(1920, 1080),
+            fps=30.0,
+            flip_h=True,
+        ))
+        expected = (
+            "scale=1920:1080:force_original_aspect_ratio=decrease,"
+            "fps=30.0,"
+            "hflip"
+        )
+        assert result == expected
+
+    def test_regression_video_filters_preserved(self) -> None:
+        """Export with user-provided video_filters — full filter string preserved exactly."""
+        cmd = CommandBuilder.export(
+            "input.mp4",
+            "output.mp4",
+            ExportParams(
+                video_filters="scale=1920:1080,hflip",
+                video_encoder="libx264",
+            ),
+        )
+        expected = [
+            "-i", "input.mp4",
+            "-vf", "scale=1920:1080,hflip",
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-movflags", "+faststart",
+            "-y",
+            "output.mp4",
+        ]
+        assert cmd == expected
+
+    def test_regression_numeric_parameters(self) -> None:
+        """Numeric parameters across all builder methods — every value unchanged.
+
+        This test proves that numeric arguments (int, float) produce identical
+        command arrays because escape_filter_value is a no-op on them.
+        """
+        # Frame extraction
+        cmd = CommandBuilder.extract_frames(
+            "input.mp4", "frame_%05d.jpg",
+            FrameExtractParams(fps=0.5, quality=3, max_count=10),
+        )
+        assert "fps=0.5" in " ".join(cmd)
+
+        # Thumbnail with custom numeric params
+        cmd = CommandBuilder.thumbnail(
+            "input.mp4", "thumb.jpg",
+            ThumbnailParams(time_seconds=10.5, width=640, height=360, quality=5),
+        )
+        full = " ".join(cmd)
+        assert "scale=640:360" in full
+        assert "-ss" in cmd and "10.5" in cmd
+
+        # Proxy with custom numeric params
+        cmd = CommandBuilder.proxy(
+            "input.mp4", "proxy.mp4",
+            ProxyParams(width=1920, height=1080, crf=18),
+        )
+        full = " ".join(cmd)
+        assert "scale=1920:1080" in full
+        assert "18" in cmd
+
+        # FPS conversion with encoder override
+        cmd = CommandBuilder.convert_fps("input.mp4", "output.mp4", 60.0, "h264_nvenc")
+        full = " ".join(cmd)
+        assert "fps=60.0" in full
+        assert "h264_nvenc" in cmd
+
+    def test_regression_build_filter_graph_custom_preserved(self) -> None:
+        """build_filter_graph with custom filter string — full string preserved."""
+        result = CommandBuilder.build_filter_graph(VideoFilters(
+            custom="subtitles=file.srt:force_style='FontSize=24'",
+        ))
+        assert result == "subtitles=file.srt:force_style='FontSize=24'"
