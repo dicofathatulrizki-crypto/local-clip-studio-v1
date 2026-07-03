@@ -80,13 +80,16 @@ class JobMetadata:
 
     def to_queue_item(self) -> QueueItem:
         """Convert to a full QueueItem for queue processing."""
+        merged_meta = dict(self.metadata)
+        if self.project_id is not None:
+            merged_meta["project_id"] = self.project_id
         return QueueItem(
             job_id=self.job_id,
             job_type=self.job_type,
             priority=self.priority,
             status=JobStatus.PENDING,
             payload=self.payload,
-            metadata=self.metadata,
+            metadata=merged_meta,
         )
 
 

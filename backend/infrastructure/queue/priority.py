@@ -54,6 +54,15 @@ class PriorityQueue:
         """True if the queue has no pending jobs."""
         return len(self._heap) == 0
 
+    @property
+    def qsize(self) -> int:
+        """Approximate number of jobs currently in the queue.
+
+        Returns a snapshot of the queue depth (not guaranteed to be
+        perfectly accurate under concurrent operations).
+        """
+        return self._pending_count
+
     # ------------------------------------------------------------------
     # Core Operations
     # ------------------------------------------------------------------

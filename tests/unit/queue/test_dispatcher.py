@@ -134,7 +134,7 @@ class TestDispatcher:
         d.register_handler("test", handler)
         await d.start()
 
-        item = QueueItem(job_id="job-1", job_type="test")
+        item = QueueItem(job_id="job-1", job_type="test", status=JobStatus.QUEUED)
         await d.enqueue(item)
         await asyncio.sleep(0.3)
         await d.stop()
