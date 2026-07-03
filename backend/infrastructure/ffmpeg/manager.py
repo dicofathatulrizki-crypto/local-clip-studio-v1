@@ -18,6 +18,7 @@ The manager composes all FFmpeg services and provides a unified API for:
 """
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +113,7 @@ class FFmpegManager:
         Raises:
             FFmpegError: On probe failure.
         """
-        return self._probe_service.probe(input_path)
+        return await asyncio.to_thread(self._probe_service.probe, input_path)
 
     def probe_sync(self, input_path: str | Path) -> MediaInfo:
         """Probe a media file synchronously.
@@ -134,7 +135,7 @@ class FFmpegManager:
         Returns:
             Dict with resolution, fps, duration, codec, etc.
         """
-        return self._video_info.to_dict(input_path)
+        return await asyncio.to_thread(self._video_info.to_dict, input_path)
 
     # ─── Thumbnail Generation ─────────────────────────────────
 
