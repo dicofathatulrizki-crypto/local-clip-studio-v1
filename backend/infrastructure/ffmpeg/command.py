@@ -5,6 +5,7 @@ shell injection. No argument value is concatenated into a shell command.
 """
 from __future__ import annotations
 
+from backend.infrastructure.ffmpeg.escape import FFmpegFilterEscaper
 from backend.infrastructure.ffmpeg.types import (
     AudioParams,
     CropParams,
@@ -76,7 +77,7 @@ class CommandBuilder:
         p = params or FrameExtractParams()
         cmd = [
             "-i", input_path,
-            "-vf", f"fps={p.fps}",
+            "-vf", f"fps={FFmpegFilterEscaper.escape_filter_value(p.fps)}",
             "-qscale:v", str(p.quality),
         ]
         if p.max_count:
@@ -93,9 +94,9 @@ class CommandBuilder:
         Default: 1 second in, 720p, JPEG.
         """
         p = params or ThumbnailParams()
-        vf_parts = [f"scale={p.width}:{p.height}:force_original_aspect_ratio=decrease"]
+        vf_parts = [f"scale={FFmpegFilterEscaper.escape_filter_value(p.width)}:{FFmpegFilterEscaper.escape_filter_value(p.height)}:force_original_aspect_ratio=decrease"]
         if p.pad:
-            vf_parts.append(f"pad={p.width}:{p.height}:(ow-iw)/2:(oh-ih)/2:color=black")
+            vf_parts.append(f"pad={FFmpegFilterEscaper.escape_filter_value(p.width)}:{FFmpegFilterEscaper.escape_filter_value(p.height)}:(ow-iw)/2:(oh-ih)/2:color=black")
         return [
             "-ss", str(p.time_seconds),
             "-i", input_path,
@@ -115,9 +116,9 @@ class CommandBuilder:
         Default: 720p H.264, CRF 23, fast preset.
         """
         p = params or ProxyParams()
-        vf = f"scale={p.width}:{p.height}:force_original_aspect_ratio=decrease"
+        vf = f"scale={FFmpegFilterEscaper.escape_filter_value(p.width)}:{FFmpegFilterEscaper.escape_filter_value(p.height)}:force_original_aspect_ratio=decrease"
         if p.pad:
-            vf += f",pad={p.width}:{p.height}:(ow-iw)/2:(oh-ih)/2:color=black"
+            vf += f",pad={FFmpegFilterEscaper.escape_filter_value(p.width)}:{FFmpegFilterEscaper.escape_filter_value(p.height)}:(ow-iw)/2:(oh-ih)/2:color=black"
         cmd = [
             "-i", input_path,
             "-vf", vf,
@@ -184,7 +185,7 @@ class CommandBuilder:
         """
         return [
             "-i", input_path,
-            "-af", f"loudnorm=I={loudness_target}:LRA=7:TP=-1.5:print_format=json",
+            "-af", f"loudnorm=I={FFmpegFilterEscaper.escape_filter_value(loudness_target)}:LRA=7:TP=-1.5:print_format=json",
             "-c:v", "copy",
             "-y",
             output_path,
@@ -198,7 +199,7 @@ class CommandBuilder:
         return [
             "-i", input_path,
             "-filter_complex",
-            f"showwavespic=s={width}x{height}:colors=white|gray",
+            f"showwavespic=s={FFmpegFilterEscaper.escape_filter_value(width)}x{FFmpegFilterEscaper.escape_filter_value(height)}:colors=white|gray",
             "-frames:v", "1",
             "-y",
             output_path,
@@ -210,8 +211,8 @@ class CommandBuilder:
     def smart_scale(input_path: str, output_path: str, width: int, height: int, encoder: str = "libx264") -> list[str]:
         """Build command to scale video to exact dimensions with padding."""
         vf = (
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black"
+            f"scale={FFmpegFilterEscaper.escape_filter_value(width)}:{FFmpegFilterEscaper.escape_filter_value(height)}:force_original_aspect_ratio=decrease,"
+            f"pad={FFmpegFilterEscaper.escape_filter_value(width)}:{FFmpegFilterEscaper.escape_filter_value(height)}:(ow-iw)/2:(oh-ih)/2:color=black"
         )
         return [
             "-i", input_path,
@@ -230,7 +231,7 @@ class CommandBuilder:
         """Build command to crop a video region."""
         return [
             "-i", input_path,
-            "-vf", f"crop={params.width}:{params.height}:{params.x}:{params.y}",
+            "-vf", f"crop={FFmpegFilterEscaper.escape_filter_value(params.width)}:{FFmpegFilterEscaper.escape_filter_value(params.height)}:{FFmpegFilterEscaper.escape_filter_value(params.x)}:{FFmpegFilterEscaper.escape_filter_value(params.y)}",
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "23",
@@ -245,7 +246,7 @@ class CommandBuilder:
         """Build command to convert frame rate."""
         return [
             "-i", input_path,
-            "-vf", f"fps={fps}",
+            "-vf", f"fps={FFmpegFilterEscaper.escape_filter_value(fps)}",
             "-c:v", encoder,
             "-preset", "fast",
             "-crf", "23",
@@ -298,7 +299,7 @@ class CommandBuilder:
             vf_parts.append(params.video_filters)
         if params.scale:
             vf_parts.append(
-                f"scale={params.scale[0]}:{params.scale[1]}:"
+                f"scale={FFmpegFilterEscaper.escape_filter_value(params.scale[0])}:{FFmpegFilterEscaper.escape_filter_value(params.scale[1])}:"
                 f"force_original_aspect_ratio=decrease"
             )
         if vf_parts:
@@ -352,9 +353,9 @@ class CommandBuilder:
         Returns:
             List of command arguments.
         """
-        vf = f"subtitles={subtitle_path}"
+        vf = f"subtitles={FFmpegFilterEscaper.escape_filter_path(subtitle_path)}"
         if burn_style:
-            vf += f":force_style='{burn_style}'"
+            vf += f":force_style='{FFmpegFilterEscaper.escape_filter_value(burn_style)}'"
         return [
             "-i", input_path,
             "-vf", vf,
@@ -386,14 +387,14 @@ class CommandBuilder:
         if use_ass:
             return [
                 "-i", input_path,
-                "-vf", f"ass={captions_path}",
+                "-vf", f"ass={FFmpegFilterEscaper.escape_filter_path(captions_path)}",
                 "-c:a", "copy",
                 "-y",
                 output_path,
             ]
         return [
             "-i", input_path,
-            "-vf", f"subtitles={captions_path}",
+            "-vf", f"subtitles={FFmpegFilterEscaper.escape_filter_path(captions_path)}",
             "-c:a", "copy",
             "-y",
             output_path,
@@ -407,23 +408,23 @@ class CommandBuilder:
         parts: list[str] = []
         if filters.scale:
             parts.append(
-                f"scale={filters.scale[0]}:{filters.scale[1]}:"
+                f"scale={FFmpegFilterEscaper.escape_filter_value(filters.scale[0])}:{FFmpegFilterEscaper.escape_filter_value(filters.scale[1])}:"
                 f"force_original_aspect_ratio=decrease"
             )
         if filters.crop:
-            parts.append(f"crop={filters.crop.width}:{filters.crop.height}:{filters.crop.x}:{filters.crop.y}")
+            parts.append(f"crop={FFmpegFilterEscaper.escape_filter_value(filters.crop.width)}:{FFmpegFilterEscaper.escape_filter_value(filters.crop.height)}:{FFmpegFilterEscaper.escape_filter_value(filters.crop.x)}:{FFmpegFilterEscaper.escape_filter_value(filters.crop.y)}")
         if filters.pad:
             parts.append(
-                f"pad={filters.pad[0]}:{filters.pad[1]}:(ow-iw)/2:(oh-ih)/2:color=black"
+                f"pad={FFmpegFilterEscaper.escape_filter_value(filters.pad[0])}:{FFmpegFilterEscaper.escape_filter_value(filters.pad[1])}:(ow-iw)/2:(oh-ih)/2:color=black"
             )
         if filters.fps:
-            parts.append(f"fps={filters.fps}")
+            parts.append(f"fps={FFmpegFilterEscaper.escape_filter_value(filters.fps)}")
         if filters.flip_h:
             parts.append("hflip")
         if filters.flip_v:
             parts.append("vflip")
         if filters.rotate:
-            parts.append(f"rotate={filters.rotate}*PI/180")
+            parts.append(f"rotate={FFmpegFilterEscaper.escape_filter_value(filters.rotate)}*PI/180")
         if filters.custom:
             parts.append(filters.custom)
         return ",".join(parts)
