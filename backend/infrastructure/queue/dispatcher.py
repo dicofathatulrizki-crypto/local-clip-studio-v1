@@ -243,12 +243,12 @@ class Dispatcher:
     ) -> None:
         """Enqueue a job for dispatch."""
         item.resources = resources
-        await self._priority_queue.put(item)
+        await self._priority_queue.enqueue(item)
 
     async def enqueue_many(self, items: list[QueueItem]) -> None:
         """Enqueue multiple jobs at once."""
         for item in items:
-            await self._priority_queue.put(item)
+            await self._priority_queue.enqueue(item)
 
     async def start(self) -> None:
         """Start the dispatch loop."""
@@ -264,8 +264,8 @@ class Dispatcher:
         if self._dispatch_task is not None:
             self._dispatch_task.cancel()
             try:
-                await self._dispatch_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self._dispatch_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             self._dispatch_task = None
         logger.info("Dispatcher stopped")
@@ -274,7 +274,7 @@ class Dispatcher:
         """Main dispatch loop — polls queue and dispatches jobs."""
         while self._running:
             try:
-                item = await self._priority_queue.get()
+                item = await self._priority_queue.dequeue()
                 if item is None:
                     await asyncio.sleep(self._poll_interval)
                     continue
@@ -295,7 +295,7 @@ class Dispatcher:
             can_run = await self._concurrency.can_dispatch(item.job_type)
             if not can_run:
                 # Re-queue for later
-                await self._priority_queue.put(item)
+                await self._priority_queue.enqueue(item)
                 return
 
             # Acquire resource locks
@@ -315,7 +315,7 @@ class Dispatcher:
                 # Release any acquired locks
                 for rid in acquired_resources:
                     await self._resource_locks.release(rid, item.job_id)
-                await self._priority_queue.put(item)
+                await self._priority_queue.enqueue(item)
                 return
 
             # Acquire concurrency slot
@@ -325,14 +325,14 @@ class Dispatcher:
             if not acquired_slot:
                 for rid in acquired_resources:
                     await self._resource_locks.release(rid, item.job_id)
-                await self._priority_queue.put(item)
+                await self._priority_queue.enqueue(item)
                 return
 
         # Execute handler outside lock
         handler = self._handlers.get(item.job_type)
         if handler is None:
             logger.warning("No handler registered for job type: %s", item.job_type)
-            await self._priority_queue.put(item)
+            await self._priority_queue.enqueue(item)
             await self._concurrency.release(item.job_id, item.job_type)
             for rid in (item.resources or []):
                 await self._resource_locks.release(rid, item.job_id)
