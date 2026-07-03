@@ -134,13 +134,12 @@ Every finding from the audit report was tested against the **current codebase** 
 - **Tests to run:** `tests/unit/api/test_app_factory.py`
 
 ### H11. `is_encrypted()` is non-functional (Audit §12.5)
-- **Status:** 🔴 Confirmed Bug
-- **Root cause:** `Fernet(value.encode())` in `is_encrypted()` tests if `value` is a valid Fernet **key**, not a valid Fernet **token**. Returns `False` for all real ciphertext.
-- **Affected files:** `backend/config/encryption.py:124-130`, `backend/services/provider_service.py:149,426`, `backend/services/settings_service.py:245`
-- **Architectural impact:** API keys may be re-encrypted on every save, producing double-encrypted values that fail to decrypt
-- **Fix difficulty:** Low — use `try: Fernet(key).decrypt(value.encode())` or store explicit `is_encrypted` flag
-- **Dependencies:** None
-- **Tests to run:** Encryption unit tests
+- **Status:** ✅ Fixed
+- **Root cause:** `Fernet(value)` tests if `value` is a valid Fernet **key**, not a valid Fernet **token**. Returns `False` for all real ciphertext.
+- **Impact chain:** (1) `_encrypt_sensitive()` always re-encrypts → double-encrypted keys; (2) `validate_provider()` always adds "must be encrypted" error; (3) `get_provider_settings()` never decrypts → raw ciphertext returned
+- **Fix:** Changed `is_encrypted()` to structural check: `base64.urlsafe_b64decode` + minimum 73-byte length (1+8+16+16+32 = Fernet v0 token). No key required. Moved `import base64` to module level.
+- **Files changed:** `backend/config/encryption.py`
+- **Tests executed:** Encryption 6/6 ✅, Provider 100/100 ✅, Settings ✅
 
 ### H12. Blocking subprocess calls block event loop (Audit §13.2)
 - **Status:** 🔴 Confirmed Bug

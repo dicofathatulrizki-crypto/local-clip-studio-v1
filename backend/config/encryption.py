@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import platform
 import hashlib
@@ -122,9 +123,17 @@ class APIKeyEncryption:
 
     @staticmethod
     def is_encrypted(value: str) -> bool:
-        """Check if a string looks like a Fernet token."""
+        """Check if a string looks like a Fernet-encrypted token.
+
+        Validates the structure by base64-decoding the value and checking
+        for the minimum Fernet token size (version + timestamp + IV +
+        ciphertext + HMAC = 73+ bytes). This does NOT attempt to decrypt
+        the value, so no key is required.
+        """
         try:
-            Fernet(value.encode("utf-8"))
-            return True
+            decoded = base64.urlsafe_b64decode(value.encode("utf-8"))
+            # Fernet v0 token minimum: version(1) + timestamp(8) + IV(16)
+            # + ciphertext(16, AES block) + HMAC(32) = 73 bytes
+            return len(decoded) >= 73
         except Exception:
             return False
