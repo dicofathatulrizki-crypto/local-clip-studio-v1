@@ -23,6 +23,7 @@ from backend.infrastructure.ffmpeg.errors import (
     FFmpegTimeoutError,
     translate_error,
 )
+from backend.infrastructure.ffmpeg.escape import FFmpegFilterEscaper
 from backend.infrastructure.ffmpeg.export import (
     ExportEncoder,
     ExportParams,
@@ -76,6 +77,7 @@ __all__ = [
     "FFmpegCapabilities",
     "FFmpegCodecError",
     "FFmpegError",
+    "FFmpegFilterEscaper",
     "FFmpegFormatError",
     "FFmpegIntegrityError",
     "FFmpegLocator",
