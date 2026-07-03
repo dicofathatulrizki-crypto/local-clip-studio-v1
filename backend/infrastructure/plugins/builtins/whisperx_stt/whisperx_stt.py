@@ -1,14 +1,19 @@
-"""WhisperX STT Provider — placeholder implementation.
+"""WhisperX STT Provider — model loading lifecycle.
 
-This is the foundation for C1 (STT Plugin). It satisfies all
-STTProvider interface contracts with minimal placeholder implementations.
-No AI model loading, no GPU code, no external dependencies.
+Implements lazy model loading via faster-whisper with:
+- HAL-based device auto-detection
+- Configurable model selection (default: large-v3)
+- Model caching directory via ModelStorageManager
+- Proper CUDA/CPU memory cleanup on unload
 
-Actual transcription will be implemented in a subsequent commit (C1.2).
+Transcription will be implemented in C1.3.
 """
 from __future__ import annotations
 
+import gc
 from typing import Any
+
+from faster_whisper import WhisperModel
 
 from backend.infrastructure.plugins.interfaces import (
     ModelInfo,
@@ -18,14 +23,20 @@ from backend.infrastructure.plugins.interfaces import (
 
 
 class WhisperXSTTProvider(STTProvider):
-    """Speech-to-text provider using WhisperX.
+    """Speech-to-text provider using faster-whisper.
 
-    Currently a placeholder that satisfies the STTProvider interface
-    without loading any models. All substantive methods return
-    ProviderResult(success=False) indicating "not yet implemented".
+    Loads a Whisper model via faster-whisper on the first call to
+    load(). Subsequent calls are no-ops. Device is auto-detected
+    via the HAL subsystem unless explicitly specified in config.
 
     Lifecycle:
         init() → activate() → load(config) → transcribe() → unload() → shutdown()
+
+    Config keys:
+        model_name (str): Model ID (default: "large-v3")
+        device (str): Override device ("cuda", "cpu"), else HAL auto-detect
+        compute_type (str): Override compute type ("float16", "int8", etc.)
+        download_root (str): Model cache directory, else app default
     """
 
     PROVIDER_VERSION: str = "1.0.0"
@@ -39,6 +50,10 @@ class WhisperXSTTProvider(STTProvider):
         self._initialized: bool = False
         self._active: bool = False
         self._loaded: bool = False
+        self._model: WhisperModel | None = None
+        self._model_name: str | None = None
+        self._device: str | None = None
+        self._compute_type: str | None = None
 
     # ─── Lifecycle Hooks ─────────────────────────────────────
 
@@ -69,52 +84,214 @@ class WhisperXSTTProvider(STTProvider):
         """Lifecycle: release all resources.
 
         Called by PluginLifecycleManager during plugin shutdown.
+        Delegates to unload() to ensure model resources are freed
+        regardless of whether unload() is called separately.
         """
+        self.unload()
         self._initialized = False
         self._active = False
-        self._loaded = False
 
     # ─── BaseProvider Contract ───────────────────────────────
 
     def load(self, config: dict[str, Any] | None = None) -> ProviderResult:
-        """Load WhisperX model and prepare resources.
+        """Load the Whisper model via faster-whisper.
 
-        Currently a placeholder. Will load the Whisper model
-        on the specified device in a subsequent commit.
+        Lazy loading — the model is loaded exactly once. Repeated
+        calls return success immediately without re-loading.
+
+        Device auto-detection uses the HAL subsystem to select the
+        best available backend (CUDA, ROCm, or CPU). Metal/MPS is
+        not supported by faster-whisper (CTranslate2 limitation).
 
         Args:
-            config: Optional configuration with 'device', 'model_name', etc.
+            config: Optional dict with keys:
+                - model_name: Model ID (default "large-v3")
+                - device: Override device string
+                - compute_type: Override compute type
+                - download_root: Model cache directory
 
         Returns:
-            ProviderResult indicating the feature is not yet implemented.
+            ProviderResult with model metadata on success.
         """
+        # Lazy: already loaded → return success
+        if self._loaded and self._model is not None:
+            return ProviderResult(
+                success=True,
+                data={"already_loaded": True},
+            )
+
+        cfg = config or {}
+        model_name = str(cfg.get("model_name", "large-v3"))
+        device = cfg.get("device")
+        compute_type = cfg.get("compute_type")
+        download_root = cfg.get("download_root")
+
+        # Auto-detect device via HAL if not specified
+        if device is None:
+            device = self._detect_device()
+
+        # Auto-select compute type based on device if not specified
+        if compute_type is None:
+            compute_type = self._select_compute_type(device)
+
+        # Auto-select download root via ModelStorageManager if not specified
+        if download_root is None:
+            download_root = self._get_model_download_root()
+
+        try:
+            self._model = WhisperModel(
+                model_name,
+                device=device,
+                compute_type=compute_type,
+                download_root=download_root,
+            )
+        except Exception as exc:
+            self._model = None
+            return ProviderResult(
+                success=False,
+                error=f"Failed to load model '{model_name}' on device '{device}': {exc}",
+            )
+
+        self._loaded = True
+        self._model_name = model_name
+        self._device = device
+        self._compute_type = compute_type
+
         return ProviderResult(
-            success=False,
-            error="WhisperX model loading is not yet implemented (C1.2)",
+            success=True,
+            data={
+                "model_name": model_name,
+                "device": device,
+                "compute_type": compute_type,
+                "download_root": download_root,
+            },
         )
 
     def unload(self) -> ProviderResult:
-        """Release all loaded model resources.
+        """Release the loaded model and free resources.
 
-        Currently a placeholder. Will free GPU memory in a subsequent commit.
+        Deletes the model reference, runs garbage collection,
+        and attempts to clear GPU memory if torch is available.
+        May be called repeatedly — subsequent calls are no-ops.
 
         Returns:
-            ProviderResult indicating the feature is not yet implemented.
+            ProviderResult with cleanup details.
         """
+        if not self._loaded or self._model is None:
+            return ProviderResult(
+                success=True,
+                data={"already_unloaded": True},
+            )
+
+        del self._model
+        self._model = None
+        self._model_name = None
+        self._device = None
+        self._compute_type = None
+        self._loaded = False
+
+        # Run garbage collection
+        gc.collect()
+
+        # Attempt GPU memory cleanup if available
+        self._clear_gpu_cache()
+
         return ProviderResult(
-            success=False,
-            error="WhisperX model unloading is not yet implemented (C1.2)",
+            success=True,
+            data={"unloaded": True},
         )
+
+    # ─── Private: Device & Resource Helpers ─────────────────
+
+    @staticmethod
+    def _detect_device() -> str:
+        """Detect the best available device for faster-whisper.
+
+        Uses the HAL subsystem to select the optimal backend.
+        Falls back gracefully to CPU on error or if only CPU is available.
+
+        Returns:
+            Device string: "cuda" or "cpu".
+        """
+        try:
+            from backend.infrastructure.hal import create_hal
+            from backend.infrastructure.hal.types import BackendType
+
+            hal = create_hal()
+            selection = hal.select_backend()
+            bt = selection.backend_type
+
+            # CTranslate2 (used by faster-whisper) only supports CUDA and CPU.
+            # ROCm uses CUDA-compatible API; Metal/MPS is not supported.
+            if bt in (BackendType.CUDA, BackendType.ROCM):
+                return "cuda"
+            return "cpu"
+        except Exception:
+            return "cpu"
+
+    @staticmethod
+    def _select_compute_type(device: str) -> str:
+        """Select optimal compute type for the given device.
+
+        Args:
+            device: Device string ("cuda" or "cpu").
+
+        Returns:
+            Compute type string for faster-whisper.
+        """
+        if device == "cuda":
+            return "float16"
+        return "int8"
+
+    @staticmethod
+    def _get_model_download_root() -> str | None:
+        """Get the app-managed model download directory.
+
+        Uses ModelStorageManager to obtain the whisper category
+        directory under the application's storage path.
+
+        Returns:
+            Path string or None if unavailable.
+        """
+        try:
+            from backend.infrastructure.filesystem.model_manager import (
+                ModelStorageManager,
+            )
+
+            mgr = ModelStorageManager()
+            path = mgr.category_dir("whisper")
+            path.mkdir(parents=True, exist_ok=True)
+            return str(path)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _clear_gpu_cache() -> None:
+        """Attempt to clear GPU memory cache.
+
+        Tries torch.cuda.empty_cache() if torch is available.
+        This is purely opportunistic — failure is silently ignored.
+        """
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except (ImportError, RuntimeError):
+            pass
 
     def health_check(self) -> dict[str, Any]:
         """Return provider health status.
 
         Returns:
-            Dict with 'status' key (always 'ok' for placeholder).
+            Dict with runtime state and model info.
         """
         return {
             "status": "ok",
-            "loaded": getattr(self, "_loaded", False),
+            "loaded": self._loaded,
+            "model_name": self._model_name,
+            "device": self._device,
+            "compute_type": self._compute_type,
             "provider": "whisperx-stt",
             "version": self.PROVIDER_VERSION,
         }
