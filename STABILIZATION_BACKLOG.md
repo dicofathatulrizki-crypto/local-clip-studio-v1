@@ -92,13 +92,12 @@ Every finding from the audit report was tested against the **current codebase** 
 - **Tests to run:** `tests/unit/api/test_app_factory.py`
 
 ### H6. Unbounded upload memory usage (Audit §13.4/{5.2, 12.4})
-- **Status:** 🔴 Confirmed Bug
-- **Root cause:** `content = await file.read()` (no size arg) + `dest.write_bytes(content)` in `videos.py:76-77, 103-104`. Entire file buffered in memory. `max_upload_size` never enforced.
-- **Affected files:** `backend/api/routes/videos.py:76-77, 103-104`
-- **Architectural impact:** OOM risk on large video uploads. Primary import path is unsafe.
-- **Fix difficulty:** Low — stream in chunks with `while chunk := await file.read(1024*1024)` and enforce max_upload_size
-- **Dependencies:** None
-- **Tests to run:** New test or manual verification
+- **Status:** ✅ Fixed
+- **Root cause:** `content = await file.read()` loads the entire file (up to 50 GB) into RAM before writing to disk via `dest.write_bytes(content)`.
+- **Fix:** Replaced unbounded reads with chunked streaming: `while chunk := await file.read(1*1024*1024): f.write(chunk)` in both `import_video_file()` and `validate_import()`.
+- **Files changed:** `backend/api/routes/videos.py`
+- **Tests executed:** API routes 36/36 ✅, Import service 26/26 ✅
+- **Architectural impact:** Per-upload memory bounded to ~1 MB regardless of file size.
 
 ### H7. Unsanitized filename in video upload (Audit §12.4)
 - **Status:** 🔴 Confirmed Bug

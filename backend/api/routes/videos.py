@@ -71,10 +71,13 @@ async def import_video_file(
     import tempfile
     from pathlib import Path
 
+    _CHUNK_SIZE = 1024 * 1024  # 1 MB
+
     tmp = Path(tempfile.mkdtemp(prefix="import_"))
     dest = tmp / (file.filename or "video.mp4")
-    content = await file.read()
-    dest.write_bytes(content)
+    with open(dest, "wb") as f:
+        while chunk := await file.read(_CHUNK_SIZE):
+            f.write(chunk)
 
     try:
         result = await svc.import_file(project_id=project_id, file_path=dest, generate_proxy=generate_proxy)
@@ -98,10 +101,13 @@ async def validate_import(
     import tempfile
     from pathlib import Path
 
+    _CHUNK_SIZE = 1024 * 1024  # 1 MB
+
     tmp = Path(tempfile.mkdtemp(prefix="val_"))
     dest = tmp / (file.filename or "video.mp4")
-    content = await file.read()
-    dest.write_bytes(content)
+    with open(dest, "wb") as f:
+        while chunk := await file.read(_CHUNK_SIZE):
+            f.write(chunk)
 
     try:
         result = await svc.validate_file(str(dest))
