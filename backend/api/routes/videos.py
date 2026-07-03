@@ -13,6 +13,7 @@ from backend.infrastructure.database.repositories.video_repo import (
     VideoMasterRepository,
 )
 from backend.infrastructure.ffmpeg import FFprobeService
+from backend.infrastructure.ffmpeg.locate import FFmpegLocator
 from backend.infrastructure.filesystem.directory_manager import DirectoryManager
 from backend.infrastructure.filesystem.file_manager import FileManager
 from backend.services.import_service import ImportService
@@ -49,12 +50,13 @@ class ValidationResponse(BaseModel):
 # ── Dependencies ────────────────────────────────────────────
 
 def _get_service(session=Depends(get_db_session)) -> ImportService:
+    locator = FFmpegLocator()
     return ImportService(
         video_master_repository=VideoMasterRepository(session),
         project_video_repository=ProjectVideoRepository(session),
         project_repository=ProjectRepository(session),
         file_manager=FileManager(),
-        ffprobe_service=FFprobeService(),
+        ffprobe_service=FFprobeService(locator.ffprobe_path),
         directory_manager=DirectoryManager(),
     )
 

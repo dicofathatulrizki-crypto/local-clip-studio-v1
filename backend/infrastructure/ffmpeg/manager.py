@@ -67,7 +67,7 @@ class FFmpegManager:
         encoder_selector: GpuEncoderSelector | None = None,
     ) -> None:
         self._locator = locator or FFmpegLocator()
-        self._probe_service = probe_service or FFprobeService()
+        self._probe_service = probe_service or FFprobeService(self._locator.ffprobe_path)
         self._runner = process_runner or ProcessRunner()
         self._video_info = video_info or VideoInfoExtractor(self._probe_service)
         self._thumbnail = thumbnail or ThumbnailGenerator(self._runner)
