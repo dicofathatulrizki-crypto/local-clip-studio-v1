@@ -43,8 +43,21 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
 
 
 def setup_middleware(app: FastAPI, settings: Settings) -> None:
-    """Configure all middleware for the FastAPI application."""
-    # CORS
+    """Configure all middleware for the FastAPI application.
+
+    Middleware order is critical — CORSMiddleware must be outermost
+    so it can attach CORS headers to error responses constructed by
+    inner middleware (e.g. ErrorHandlingMiddleware).
+    """
+    # Error handling (innermost — catches exceptions first, but its
+    # error responses pass through outer middleware layers for CORS)
+    app.add_middleware(ErrorHandlingMiddleware)
+
+    # Correlation ID
+    app.add_middleware(CorrelationIDMiddleware)
+
+    # CORS (outermost — wraps all responses including error responses
+    # from inner middleware, ensuring CORS headers are always present)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.api.cors_origins,
@@ -52,9 +65,3 @@ def setup_middleware(app: FastAPI, settings: Settings) -> None:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    # Correlation ID
-    app.add_middleware(CorrelationIDMiddleware)
-
-    # Error handling (must be last to catch all exceptions)
-    app.add_middleware(ErrorHandlingMiddleware)
