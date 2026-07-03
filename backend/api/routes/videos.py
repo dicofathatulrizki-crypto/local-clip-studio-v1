@@ -71,10 +71,20 @@ async def import_video_file(
     import tempfile
     from pathlib import Path
 
+    import uuid
+
     _CHUNK_SIZE = 1024 * 1024  # 1 MB
+    _SAFE_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+
+    # Generate a safe UUID filename. Never trust UploadFile.filename (CWE-22).
+    raw_name = file.filename or "video.mp4"
+    ext = Path(raw_name).suffix.lower()
+    if ext not in _SAFE_EXTENSIONS:
+        ext = ".mp4"
+    safe_name = uuid.uuid4().hex + ext
 
     tmp = Path(tempfile.mkdtemp(prefix="import_"))
-    dest = tmp / (file.filename or "video.mp4")
+    dest = tmp / safe_name
     with open(dest, "wb") as f:
         while chunk := await file.read(_CHUNK_SIZE):
             f.write(chunk)
@@ -84,7 +94,7 @@ async def import_video_file(
         return ImportResponse(
             id=result.id,
             video_id=result.video_id,
-            filename=file.filename or "video.mp4",
+            filename=safe_name,
             hash=result.source_path.split("/")[-1].split(".")[0],
             status=result.status,
         )
@@ -101,10 +111,20 @@ async def validate_import(
     import tempfile
     from pathlib import Path
 
+    import uuid
+
     _CHUNK_SIZE = 1024 * 1024  # 1 MB
+    _SAFE_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+
+    # Generate a safe UUID filename. Never trust UploadFile.filename (CWE-22).
+    raw_name = file.filename or "video.mp4"
+    ext = Path(raw_name).suffix.lower()
+    if ext not in _SAFE_EXTENSIONS:
+        ext = ".mp4"
+    safe_name = uuid.uuid4().hex + ext
 
     tmp = Path(tempfile.mkdtemp(prefix="val_"))
-    dest = tmp / (file.filename or "video.mp4")
+    dest = tmp / safe_name
     with open(dest, "wb") as f:
         while chunk := await file.read(_CHUNK_SIZE):
             f.write(chunk)
