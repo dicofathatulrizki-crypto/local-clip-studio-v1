@@ -1,4 +1,4 @@
-"""FFmpegFilterEscaper — centralized FFmpeg filter argument escaping.
+r"""FFmpegFilterEscaper — centralized FFmpeg filter argument escaping.
 
 All FFmpeg filter graph strings built by CommandBuilder must pass their
 user-supplied or file-path values through these methods before constructing
@@ -14,11 +14,11 @@ from __future__ import annotations
 
 
 class FFmpegFilterEscaper:
-    """Centralized FFmpeg filter argument escaping.
+    r"""Centralized FFmpeg filter argument escaping.
 
     Usage:
         escaped = FFmpegFilterEscaper.escape_filter_value("path:value")
-        assert escaped == "path\\:value"
+        assert escaped == "path\:value"
     """
 
     # Characters with special meaning in FFmpeg filtergraph syntax.
@@ -27,9 +27,9 @@ class FFmpegFilterEscaper:
 
     @staticmethod
     def escape_filter_value(value: str | int | float) -> str:
-        """Escape a value for use in -vf/-af/-filter_complex filter arguments.
+        r"""Escape a value for use in -vf/-af/-filter_complex filter arguments.
 
-        Escapes: \\ : , ; = [ ] '
+        Escapes: \ : , ; = [ ] '
         Idempotent: applying twice produces the same result.
         Achieved by scanning character-by-character and preserving
         already-escaped sequences (backslash + special char) as-is.
