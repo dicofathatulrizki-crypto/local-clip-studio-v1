@@ -61,12 +61,13 @@ class StorageLimits:
     @classmethod
     def from_settings(cls) -> StorageLimits:
         settings = get_settings()
+        s = settings.storage
         return cls(
-            max_project_size_gb=settings.storage.max_project_size_gb,
-            max_cache_size_gb=settings.storage.max_cache_size_gb,
-            max_model_storage_gb=settings.storage.max_model_storage_gb,
-            max_log_size_gb=10,
-            max_temp_size_gb=20,
+            max_project_size_gb=s.per_project_source_limit // (1024**3),
+            max_cache_size_gb=s.global_cache_limit // (1024**3),
+            max_model_storage_gb=s.model_storage_limit // (1024**3),
+            max_log_size_gb=max(1, s.log_limit // (1024**3)),  # storage default is ~500 MB → 1 GB floor
+            max_temp_size_gb=s.temp_limit // (1024**3),
             max_export_size_gb=500,
         )
 

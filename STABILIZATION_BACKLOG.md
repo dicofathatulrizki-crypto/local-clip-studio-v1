@@ -76,13 +76,11 @@ Every finding from the audit report was tested against the **current codebase** 
 - **Tests to run:** `tests/unit/database/`, verify no import errors
 
 ### H4. `StorageManager` field mismatch (Audit §5.1)
-- **Status:** 🔴 Confirmed Bug
-- **Root cause:** `StorageLimits.from_settings()` reads `max_project_size_gb`, `max_cache_size_gb`, `max_model_storage_gb` from `settings.storage`, but `StorageSettings` defines `per_project_source_limit`, `global_cache_limit`, `model_storage_limit` (different names, different units).
-- **Affected files:** `backend/infrastructure/filesystem/storage_manager.py:65-67`, `backend/config/settings.py`
-- **Architectural impact:** `StorageManager` cannot be constructed. 11 test failures in filesystem tests.
-- **Fix difficulty:** Low — update `from_settings()` to use the actual field names (with bytes → GB conversion)
-- **Dependencies:** None
-- **Tests to run:** `tests/unit/test_filesystem.py`
+- **Status:** ✅ Fixed
+- **Root cause:** `StorageLimits.from_settings()` accesses `settings.storage.max_project_size_gb` (doesn't exist). Actual field names are `per_project_source_limit`, `global_cache_limit`, `model_storage_limit`, `log_limit`, `temp_limit` — stored in bytes, not GB.
+- **Fix:** Updated field names with `// (1024**3)` byte-to-GB conversion. `log_limit` uses `max(1, ...)` to prevent truncation (default 500 MB → 0 GB without floor).
+- **Files changed:** `backend/infrastructure/filesystem/storage_manager.py`
+- **Tests executed:** Unit 47/50 (3 pre-existing failures in unrelated `ExportStorageManager`), Integration 15/15 ✅
 
 ### H5. CORS headers dropped on error responses (Audit §3.3)
 - **Status:** 🔴 Confirmed Bug
