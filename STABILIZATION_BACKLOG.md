@@ -32,13 +32,11 @@ Every finding from the audit report was tested against the **current codebase** 
 ## Phase 1: Critical Bugs
 
 ### C1. Video import broken by `await` on synchronous `probe()` (Audit §13.1)
-- **Status:** 🔴 Confirmed Bug
-- **Root cause:** `import_service.py:275` does `return await self._ffprobe.probe(str(path))` but `FFprobeService.probe()` is synchronous (`def probe`, not `async def`). `await` on a non-coroutine raises `TypeError` unconditionally.
-- **Affected files:** `backend/services/import_service.py:275`, `backend/infrastructure/ffmpeg/ffprobe.py:46`
-- **Architectural impact:** Primary use case (video import) is non-functional. No workaround.
-- **Fix difficulty:** Very Low — remove `await` and/or wrap in `asyncio.to_thread()`
-- **Dependencies:** None
-- **Tests to run:** `tests/unit/services/test_import_service.py`, `tests/unit/api/test_api_routes.py`
+- **Status:** ✅ Fixed
+- **Root cause:** `import_service.py:277` does `return await self._ffprobe.probe(str(path))` but `FFprobeService.probe()` is synchronous. Also type mismatch: caller expected `dict` but `probe()` returns `MediaInfo`.
+- **Fix:** Wrapped sync probe in `asyncio.to_thread()`. Changed `_first_video_stream`, `_first_audio_stream`, `_build_metadata` to use `MediaInfo`/`MediaStreamInfo` API instead of dict keys.
+- **Files changed:** `backend/services/import_service.py`, `tests/unit/services/test_import_service.py`
+- **Tests executed:** `tests/unit/services/test_import_service.py` — 26/26 passed ✅; `tests/unit/ffmpeg/` + `tests/integration/ffmpeg/` — 161/161 passed ✅
 
 ### C2. No CI/CD pipeline (Audit §14.1)
 - **Status:** 🔴 Confirmed Bug (process gap, not code)

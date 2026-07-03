@@ -18,6 +18,7 @@ from backend.infrastructure.errors import (
     StorageError,
     ValidationError,
 )
+from backend.infrastructure.ffmpeg.types import MediaInfo, MediaStreamInfo
 from backend.services.import_service import ImportResult, ImportService
 
 
@@ -56,7 +57,7 @@ def mock_file_manager():
 @pytest.fixture
 def mock_ffprobe():
     r = MagicMock()
-    r.probe = AsyncMock()
+    r.probe = MagicMock()  # sync callable — wrapped in asyncio.to_thread by _probe_file
     return r
 
 
@@ -84,12 +85,37 @@ def service( mock_vm_repo, mock_pv_repo, mock_proj_repo, mock_file_manager, mock
     )
 
 
-def _probe_response(width=640, height=480, fps_frac="30/1", codec="h264", duration="10.0", bitrate="1000000"):
-    return {
-        "streams": [{"codec_type": "video", "width": width, "height": height,
-                     "r_frame_rate": fps_frac, "codec_name": codec}],
-        "format": {"duration": duration, "bit_rate": bitrate},
-    }
+def _make_stream(**kwargs) -> MediaStreamInfo:
+    return MediaStreamInfo(
+        index=0,
+        codec_type=kwargs.get("codec_type", "video"),
+        codec=kwargs.get("codec_name", "h264"),
+        codec_long="",
+        width=kwargs.get("width", 640),
+        height=kwargs.get("height", 480),
+        fps=kwargs.get("fps", 30.0),
+        bitrate=kwargs.get("bitrate", 1000000),
+        duration_ms=int(float(kwargs.get("duration", "10.0")) * 1000),
+    )
+
+
+def _probe_response(width=640, height=480, fps=30.0, codec="h264", duration="10.0", bitrate="1000000"):
+    return MediaInfo(
+        path="",
+        file_size_bytes=0,
+        duration_ms=int(float(duration) * 1000),
+        bitrate=int(bitrate),
+        format_name="mp4",
+        video_streams=[_make_stream(
+            codec_type="video", codec_name=codec,
+            width=width, height=height, fps=fps,
+            duration=duration,
+        )],
+        audio_streams=[_make_stream(
+            codec_type="audio", codec_name="aac",
+            bitrate=128000, duration=duration,
+        )],
+    )
 
 
 # ==================================================================
@@ -172,7 +198,11 @@ class TestImportFile:
         path = tmp_path / "audio.mp4"
         path.write_bytes(b"audio")
         mock_proj_repo.get_domain.return_value = project_domain
-        mock_ffprobe.probe.return_value = {"streams": [{"codec_type": "audio"}], "format": {"duration": "10.0"}}
+        mock_ffprobe.probe.return_value = MediaInfo(
+            path="",
+            video_streams=[],
+            audio_streams=[_make_stream(codec_type="audio", codec_name="aac")],
+        )
         with pytest.raises(ValidationError, match="video stream"):
             await service.import_file("proj-123", str(path))
 

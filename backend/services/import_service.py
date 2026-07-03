@@ -30,6 +30,7 @@ from backend.infrastructure.errors import (
     ValidationError,
 )
 from backend.infrastructure.ffmpeg import FFprobeService
+from backend.infrastructure.ffmpeg.types import MediaInfo, MediaStreamInfo
 from backend.infrastructure.filesystem.directory_manager import DirectoryManager
 from backend.infrastructure.filesystem.file_manager import FileManager
 from backend.infrastructure.logging.logger import get_logger
@@ -272,44 +273,34 @@ class ImportService:
             raise StorageError(message=f"Hash failed: {exc}", details={"path": str(path)})
         return sha256.hexdigest()
 
-    async def _probe_file(self, path: Path) -> dict[str, Any]:
+    async def _probe_file(self, path: Path) -> MediaInfo:
         try:
-            return await self._ffprobe.probe(str(path))
+            return await asyncio.to_thread(self._ffprobe.probe, str(path))
         except Exception as exc:
             raise ValidationError(message=f"Cannot read metadata: {exc}", details={"path": str(path)})
 
-    def _first_video_stream(self, probe: dict[str, Any]) -> dict[str, Any] | None:
-        for s in probe.get("streams", []):
-            if s.get("codec_type") == "video":
-                return s
+    def _first_video_stream(self, probe: MediaInfo) -> MediaStreamInfo | None:
+        if probe.video_streams:
+            return probe.video_streams[0]
         return None
 
-    def _first_audio_stream(self, probe: dict[str, Any]) -> dict[str, Any] | None:
-        for s in probe.get("streams", []):
-            if s.get("codec_type") == "audio":
-                return s
+    def _first_audio_stream(self, probe: MediaInfo) -> MediaStreamInfo | None:
+        if probe.audio_streams:
+            return probe.audio_streams[0]
         return None
 
     def _build_metadata(
         self, path: Path, file_size: int, file_hash: str,
-        probe: dict[str, Any], vs: dict[str, Any], as_: dict[str, Any] | None,
+        probe: MediaInfo, vs: MediaStreamInfo, as_: MediaStreamInfo | None,
     ) -> dict[str, Any]:
-        fmt = probe.get("format", {})
-        fps_raw = vs.get("r_frame_rate", "0/1")
-        try:
-            parts = fps_raw.split("/")
-            fps = round(float(parts[0]) / float(parts[1]), 3) if len(parts) == 2 and float(parts[1]) != 0 else float(parts[0])
-        except (ValueError, IndexError, ZeroDivisionError):
-            fps = 0.0
-        duration = float(fmt.get("duration", 0) or 0)
         return {
-            "duration_ms": int(duration * 1000),
-            "width": vs.get("width", 0) or 0,
-            "height": vs.get("height", 0) or 0,
-            "fps": fps,
-            "video_codec": vs.get("codec_name", "unknown"),
-            "audio_codec": (as_ or {}).get("codec_name"),
-            "bitrate": int(fmt.get("bit_rate", 0)) if fmt.get("bit_rate") else None,
+            "duration_ms": probe.duration_ms,
+            "width": vs.width,
+            "height": vs.height,
+            "fps": round(vs.fps, 3),
+            "video_codec": vs.codec,
+            "audio_codec": as_.codec if as_ else None,
+            "bitrate": probe.bitrate or None,
             "file_size_bytes": file_size,
             "file_hash": file_hash,
         }
