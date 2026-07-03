@@ -1,0 +1,24 @@
+{
+  "id": "whisperx-stt",
+  "name": "WhisperX STT",
+  "version": "1.0.0",
+  "min_app_version": "1.0.0",
+  "plugin_type": "stt",
+  "author": "Local Clip Studio",
+  "description": "Speech-to-text provider using WhisperX for local transcription with word-level timestamps and language detection",
+  "entry_point": "backend.infrastructure.plugins.builtins.whisperx_stt.whisperx_stt:WhisperXSTTProvider",
+  "capabilities": [
+    "transcription",
+    "language_detection",
+    "word_timestamps"
+  ],
+  "permissions": [
+    "gpu",
+    "model_access"
+  ],
+  "models": [],
+  "dependencies": {},
+  "homepage": "",
+  "license": "MIT",
+  "tags": ["stt", "whisper", "transcription"]
+}
