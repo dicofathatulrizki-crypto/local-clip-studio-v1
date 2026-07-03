@@ -14,7 +14,7 @@ from backend.infrastructure.database.models.export_job import ExportJob
 from backend.infrastructure.database.models.caption_track import CaptionTrack
 from backend.infrastructure.database.models.processing_queue import ProcessingQueue
 from backend.infrastructure.database.models.version_snapshot import VersionSnapshot
-from backend.infrastructure.database.models.settings_entry import SettingsEntry
+from backend.infrastructure.database.models.settings import SettingsEntry
 from backend.infrastructure.database.models.provider_config import ProviderConfig
 from backend.infrastructure.database.models.model_registry import ModelRegistry
 

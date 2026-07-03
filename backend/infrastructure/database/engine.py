@@ -9,8 +9,9 @@ from typing import Any
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
+from backend.infrastructure.database.base import Base
 from backend.infrastructure.logging.logger import get_logger
 
 logger = get_logger("backend.infrastructure.database.engine")
@@ -19,12 +20,6 @@ _async_engine: Any = None
 _sync_engine: Any = None
 _async_session_factory: async_sessionmaker[AsyncSession] | None = None
 _sync_session_factory: sessionmaker[Session] | None = None
-
-
-class Base(DeclarativeBase):
-    """Base class for all ORM models."""
-
-    pass
 
 
 def init_engine(database_url: str, echo: bool = False) -> None:
