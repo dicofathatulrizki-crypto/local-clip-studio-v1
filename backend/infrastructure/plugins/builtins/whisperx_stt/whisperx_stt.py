@@ -1,17 +1,19 @@
-"""WhisperX STT Provider — model loading lifecycle.
+"""WhisperX STT Provider — basic transcription.
 
-Implements lazy model loading via faster-whisper with:
+Implements raw transcription via faster-whisper:
+- Lazy-loaded WhisperModel (C1.2)
 - HAL-based device auto-detection
-- Configurable model selection (default: large-v3)
-- Model caching directory via ModelStorageManager
-- Proper CUDA/CPU memory cleanup on unload
+- File validation via pathlib
+- Language detection from backend
+- Returns full text with detected language metadata
 
-Transcription will be implemented in C1.3.
+No word timestamps, diarization, or alignment.
 """
 from __future__ import annotations
 
 import gc
 import threading
+from pathlib import Path
 from typing import Any
 
 from faster_whisper import WhisperModel
@@ -301,22 +303,107 @@ class WhisperXSTTProvider(STTProvider):
     ) -> ProviderResult:
         """Transcribe audio to text.
 
-        Currently a placeholder. Will call WhisperX for actual
-        transcription in a subsequent commit.
+        Runs inference using the already-loaded WhisperModel.
+        No model reload occurs during transcription — the model
+        loaded by C1.2's load() is reused directly.
+
+        The model override parameter is accepted for API compatibility
+        but the currently loaded model is always used. If a different
+        model is required, call load() with the desired model_name first.
 
         Args:
-            audio_path: Path to the audio file.
-            language: Optional language code override.
-            model: Optional model ID override.
-            **kwargs: Additional provider-specific options.
+            audio_path: Path to the audio file (wav, mp3, mp4, etc.).
+            language: Optional language code (e.g., "en", "es").
+                      If None, faster-whisper auto-detects.
+            model: Ignored — uses the already-loaded model.
+                   Included for interface compatibility.
+            **kwargs: Additional options forwarded to
+                      faster_whisper.WhisperModel.transcribe().
+                      Supported: beam_size, temperature, vad_filter,
+                      initial_prompt, etc.
 
         Returns:
-            ProviderResult indicating the feature is not yet implemented.
+            ProviderResult with:
+                success: True if transcription succeeded.
+                data:
+                    text: Full transcription text.
+                    language: Detected or requested language code.
+                    language_probability: Confidence score (0-1).
+                    segments: Number of segments in the transcription.
         """
-        return ProviderResult(
-            success=False,
-            error="WhisperX transcription is not yet implemented (C1.2)",
-        )
+        # Validate model is loaded
+        if not self._loaded or self._model is None:
+            return ProviderResult(
+                success=False,
+                error="Model not loaded. Call load() before transcribe().",
+            )
+
+        # Validate audio file exists
+        audio = Path(audio_path)
+        if not audio.exists():
+            return ProviderResult(
+                success=False,
+                error=f"Audio file not found: {audio_path}",
+            )
+
+        if not audio.is_file():
+            return ProviderResult(
+                success=False,
+                error=f"Audio path is not a file: {audio_path}",
+            )
+
+        # Note: model override is accepted for interface compatibility.
+        # The currently loaded model is always used. If a different
+        # model is needed, call load() with the desired model_name first.
+
+        try:
+            # Run inference
+            segments, info = self._model.transcribe(
+                audio_path,
+                language=language,
+                word_timestamps=False,  # explicitly disabled per C1.3 scope
+                **kwargs,
+            )
+
+            # Consume the generator and build full text
+            text_parts: list[str] = []
+            segment_count: int = 0
+            for segment in segments:
+                text_parts.append(segment.text)
+                segment_count += 1
+
+            full_text = "".join(text_parts).strip()
+
+            return ProviderResult(
+                success=True,
+                data={
+                    "text": full_text,
+                    "language": info.language,
+                    "language_probability": info.language_probability,
+                    "segments": segment_count,
+                },
+            )
+
+        except FileNotFoundError:
+            return ProviderResult(
+                success=False,
+                error=f"Audio file not accessible: {audio_path}",
+            )
+        except ValueError as exc:
+            return ProviderResult(
+                success=False,
+                error=f"Invalid audio format: {exc}",
+            )
+        except RuntimeError as exc:
+            return ProviderResult(
+                success=False,
+                error=f"Inference failed: {exc}",
+            )
+        except Exception as exc:
+            return ProviderResult(
+                success=False,
+                error=f"Transcription error: {exc}",
+            )
 
     def get_available_models(self) -> list[ModelInfo]:
         """Get list of available WhisperX models.
