@@ -11,6 +11,7 @@ Transcription will be implemented in C1.3.
 from __future__ import annotations
 
 import gc
+import threading
 from typing import Any
 
 from faster_whisper import WhisperModel
@@ -49,6 +50,7 @@ class WhisperXSTTProvider(STTProvider):
         """
         self._initialized: bool = False
         self._active: bool = False
+        self._lock: threading.Lock = threading.Lock()
         self._loaded: bool = False
         self._model: WhisperModel | None = None
         self._model_name: str | None = None
@@ -96,8 +98,9 @@ class WhisperXSTTProvider(STTProvider):
     def load(self, config: dict[str, Any] | None = None) -> ProviderResult:
         """Load the Whisper model via faster-whisper.
 
-        Lazy loading — the model is loaded exactly once. Repeated
-        calls return success immediately without re-loading.
+        Thread-safe lazy loading — the model is loaded exactly once.
+        Repeated calls return success immediately without re-loading.
+        Uses double-checked locking to minimize contention.
 
         Device auto-detection uses the HAL subsystem to select the
         best available backend (CUDA, ROCm, or CPU). Metal/MPS is
@@ -113,65 +116,74 @@ class WhisperXSTTProvider(STTProvider):
         Returns:
             ProviderResult with model metadata on success.
         """
-        # Lazy: already loaded → return success
+        # Fast path: already loaded → return success (no lock)
         if self._loaded and self._model is not None:
             return ProviderResult(
                 success=True,
                 data={"already_loaded": True},
             )
 
-        cfg = config or {}
-        model_name = str(cfg.get("model_name", "large-v3"))
-        device = cfg.get("device")
-        compute_type = cfg.get("compute_type")
-        download_root = cfg.get("download_root")
+        with self._lock:
+            # Double-check: another thread may have loaded while we waited
+            if self._loaded and self._model is not None:
+                return ProviderResult(
+                    success=True,
+                    data={"already_loaded": True},
+                )
 
-        # Auto-detect device via HAL if not specified
-        if device is None:
-            device = self._detect_device()
+            cfg = config or {}
+            model_name = str(cfg.get("model_name", "large-v3"))
+            device = cfg.get("device")
+            compute_type = cfg.get("compute_type")
+            download_root = cfg.get("download_root")
 
-        # Auto-select compute type based on device if not specified
-        if compute_type is None:
-            compute_type = self._select_compute_type(device)
+            # Auto-detect device via HAL if not specified
+            if device is None:
+                device = self._detect_device()
 
-        # Auto-select download root via ModelStorageManager if not specified
-        if download_root is None:
-            download_root = self._get_model_download_root()
+            # Auto-select compute type based on device if not specified
+            if compute_type is None:
+                compute_type = self._select_compute_type(device)
 
-        try:
-            self._model = WhisperModel(
-                model_name,
-                device=device,
-                compute_type=compute_type,
-                download_root=download_root,
-            )
-        except Exception as exc:
-            self._model = None
+            # Auto-select download root via ModelStorageManager if not specified
+            if download_root is None:
+                download_root = self._get_model_download_root()
+
+            try:
+                self._model = WhisperModel(
+                    model_name,
+                    device=device,
+                    compute_type=compute_type,
+                    download_root=download_root,
+                )
+            except Exception as exc:
+                self._model = None
+                return ProviderResult(
+                    success=False,
+                    error=f"Failed to load model '{model_name}' on device '{device}': {exc}",
+                )
+
+            self._loaded = True
+            self._model_name = model_name
+            self._device = device
+            self._compute_type = compute_type
+
             return ProviderResult(
-                success=False,
-                error=f"Failed to load model '{model_name}' on device '{device}': {exc}",
+                success=True,
+                data={
+                    "model_name": model_name,
+                    "device": device,
+                    "compute_type": compute_type,
+                    "download_root": download_root,
+                },
             )
-
-        self._loaded = True
-        self._model_name = model_name
-        self._device = device
-        self._compute_type = compute_type
-
-        return ProviderResult(
-            success=True,
-            data={
-                "model_name": model_name,
-                "device": device,
-                "compute_type": compute_type,
-                "download_root": download_root,
-            },
-        )
 
     def unload(self) -> ProviderResult:
         """Release the loaded model and free resources.
 
-        Deletes the model reference, runs garbage collection,
-        and attempts to clear GPU memory if torch is available.
+        Deletes the model reference and runs garbage collection.
+        CTranslate2 (faster-whisper's backend) manages its own
+        GPU memory — deleting the WhisperModel is sufficient.
         May be called repeatedly — subsequent calls are no-ops.
 
         Returns:
@@ -192,9 +204,6 @@ class WhisperXSTTProvider(STTProvider):
 
         # Run garbage collection
         gc.collect()
-
-        # Attempt GPU memory cleanup if available
-        self._clear_gpu_cache()
 
         return ProviderResult(
             success=True,
@@ -264,21 +273,6 @@ class WhisperXSTTProvider(STTProvider):
             return str(path)
         except Exception:
             return None
-
-    @staticmethod
-    def _clear_gpu_cache() -> None:
-        """Attempt to clear GPU memory cache.
-
-        Tries torch.cuda.empty_cache() if torch is available.
-        This is purely opportunistic — failure is silently ignored.
-        """
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except (ImportError, RuntimeError):
-            pass
 
     def health_check(self) -> dict[str, Any]:
         """Return provider health status.
